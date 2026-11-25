@@ -78,7 +78,7 @@
         result.textContent='Lese Foto '+(i+1)+' von '+files.length+'…';
         const image=await createImageBitmap(files[i]);
         try{
-          const out=await worker.recognize(image);allText+='\n'+(out.data.text||'');
+          const out=await worker.recognize(files[i]);allText+='\n'+(out.data.text||'');
           if(!foundBarcode&&'BarcodeDetector'in window){try{const fmts=await BarcodeDetector.getSupportedFormats?.(),wanted=['ean_13','ean_8','upc_a','upc_e','code_128'],supported=fmts?.filter(x=>wanted.includes(x));const codes=await new BarcodeDetector(supported?.length?{formats:supported}:{}).detect(image);foundBarcode=codes.find(c=>/^\d{8,14}$/.test(c.rawValue))?.rawValue||''}catch(_){}}
         }finally{image.close()}
       }
