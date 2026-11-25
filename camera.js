@@ -67,10 +67,11 @@
   }
   function nameScore(s){return Math.min(s.length,32)+(/^[A-ZÄÖÜ]/.test(s)?3:0)-(s.split(' ').length>7?12:0)}
   input.onchange=async e=>{
-    const files=Array.from(e.target.files||[]);e.target.value='';
+    const files=Array.from(e.target.files||[]);
     if(!files.length)return;
-    if(files.length>5){say('Bitte höchstens 5 Fotos auf einmal auswählen.',true);return;}
-    if(name.disabled){say('Texterkennung ist nur beim Anlegen eines neuen Artikels verfügbar.',true);return;}
+    result.textContent=files.length+' Foto(s) ausgewählt – Texterkennung wird gestartet…';
+    if(files.length>5){result.textContent='Zu viele Fotos ausgewählt. Bitte höchstens 5 auswählen.';say('Bitte höchstens 5 Fotos auf einmal auswählen.',true);return;}
+    if(name.disabled){result.textContent='Texterkennung ist nur beim Anlegen eines neuen Artikels verfügbar.';say('Texterkennung ist nur beim Anlegen eines neuen Artikels verfügbar.',true);return;}
     try{
       const worker=await getWorker();let allText='',foundBarcode='';
       for(let i=0;i<files.length;i++){
@@ -88,6 +89,6 @@
       const found=[parsed.name?'Artikelname':'',parsed.weight?'Inhalt/Gewicht':'',foundBarcode?'Barcode':''].filter(Boolean);
       result.textContent=found.length?'Vorschläge eingefügt: '+found.join(', ')+'. Bitte prüfen.':'Text erkannt, aber Name oder Inhalt nicht sicher gefunden. Bitte Felder prüfen und ergänzen.';
       say('Foto-Erkennung abgeschlossen – Angaben bitte vor dem Speichern kontrollieren.');
-    }catch(err){result.textContent='';say(err.message||String(err),true)}
+    }catch(err){result.textContent='Texterkennung fehlgeschlagen: '+(err.message||String(err));say(err.message||String(err),true)}
   };
 })();
