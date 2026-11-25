@@ -76,11 +76,8 @@
       const worker=await getWorker();let allText='',foundBarcode='';
       for(let i=0;i<files.length;i++){
         result.textContent='Lese Foto '+(i+1)+' von '+files.length+'…';
-        const image=await createImageBitmap(files[i]);
-        try{
-          const out=await worker.recognize(files[i]);allText+='\n'+(out.data.text||'');
-          if(!foundBarcode&&'BarcodeDetector'in window){try{const fmts=await BarcodeDetector.getSupportedFormats?.(),wanted=['ean_13','ean_8','upc_a','upc_e','code_128'],supported=fmts?.filter(x=>wanted.includes(x));const codes=await new BarcodeDetector(supported?.length?{formats:supported}:{}).detect(image);foundBarcode=codes.find(c=>/^\d{8,14}$/.test(c.rawValue))?.rawValue||''}catch(_){}}
-        }finally{image.close()}
+        const out=await worker.recognize(files[i]);allText+='\n'+(out.data.text||'');
+        if(!foundBarcode&&'BarcodeDetector'in window){try{const fmts=await BarcodeDetector.getSupportedFormats?.(),wanted=['ean_13','ean_8','upc_a','upc_e','code_128'],supported=fmts?.filter(x=>wanted.includes(x));const codes=await new BarcodeDetector(supported?.length?{formats:supported}:{}).detect(files[i]);foundBarcode=codes.find(c=>/^\d{8,14}$/.test(c.rawValue))?.rawValue||''}catch(_){}}
       }
       const parsed=parseText(allText);
       if(parsed.name){name.value=parsed.name;name.dispatchEvent(new Event('input',{bubbles:true}))}
@@ -89,6 +86,6 @@
       const found=[parsed.name?'Artikelname':'',parsed.weight?'Inhalt/Gewicht':'',foundBarcode?'Barcode':''].filter(Boolean);
       result.textContent=found.length?'Vorschläge eingefügt: '+found.join(', ')+'. Bitte prüfen.':'Text erkannt, aber Name oder Inhalt nicht sicher gefunden. Bitte Felder prüfen und ergänzen.';
       say('Foto-Erkennung abgeschlossen – Angaben bitte vor dem Speichern kontrollieren.');
-    }catch(err){result.textContent='Texterkennung fehlgeschlagen: '+(err.message||String(err));say(err.message||String(err),true)}
+    }catch(err){const details=files.map(f=>f.type||f.name.split('.').pop()).join(', ');result.textContent='Texterkennung fehlgeschlagen ('+details+'): '+(err.message||String(err));say(err.message||String(err),true)}
   };
 })();
