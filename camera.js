@@ -51,18 +51,25 @@
     })();
     try{return await ocrLoading}catch(e){ocrLoading=null;throw e}
   }
-  const skip=/zutaten|nährwert|naehrwert|fett|kohlenhydrat|zucker|eiweiß|protein|salz|hersteller|anschrift|mindestens haltbar|kühl|kuehl|lagerung|portion|je 100|pro 100|www.|https?:|gmbh/i;
+  const skip=/zutaten|nährwert|naehrwert|fett|kohlenhydrat|carbohydrat|zucker|sugar|protein|eiweiß|salz|sodium|kcal|kj|energy|energie|hersteller|anschrift|mindestens haltbar|kühl|kuehl|lagerung|portion|je 100|pro 100|www.|https?:|gmbh|ingredient|ingrediente|sestav|rich|moist|fudgy|with real|belgian/i;
   function parseText(text){
     const lines=text.split(/[\r\n]+/).map(x=>x.replace(/\s+/g,' ').trim()).filter(Boolean);
-    const names=lines.filter(x=>x.length>=3&&x.length<=65&&/[a-zäöü]/i.test(x)&&!/^\d+[\d\s.,/-]*$/.test(x)&&!skip.test(x));
+    const names=lines.filter(x=>{
+      const letters=(x.match(/[a-zäöüß]/gi)||[]).length,digits=(x.match(/\d/g)||[]).length,words=x.match(/[a-zäöüß]+/gi)||[],compact=x.replace(/\s/g,'');
+      return x.length>=4&&x.length<=65&&letters>=7&&digits<=1&&letters/Math.max(1,compact.length)>=0.72&&words.length>=2&&!words.some(w=>w.length===1)&&!skip.test(x)&&!/[©®]/.test(x);
+    });
     const nameCandidate=names.sort((a,b)=>nameScore(b)-nameScore(a))[0]||'';
     const weights=[];
+    const addWeight=(raw,unit,priority)=>{let q=Number(raw.replace(',','.')),u=unit.toLowerCase();if(u==='mg'){q/=1000;u='g'}if(u==='cl'){q*=10;u='ml'}if(u==='dl'){q*=100;u='ml'}if(q>0&&q<100000&&['g','kg','ml','l'].includes(u))weights.push({q,u,priority});};
+    const flat=text.replace(/\s+/g,' ');
+    const netPattern=/(?:netto(?:gewicht|inhalt|menge)?|net\s*(?:weight|wt|content)|contenido\s*neto|peso\s*neto|netto\s*súly)[^0-9]{0,220}(\d{1,4}(?:[.,]\d{1,3})?)\s*(kg|g|mg|l|ml|cl|dl)\b/ig;
+    let nm;while((nm=netPattern.exec(flat)))addWeight(nm[1],nm[2],5);
     for(const line of lines){
-      if(/nährwert|naehrwert|fett|kohlenhydrat|zucker|eiweiß|protein|salz|je 100|pro 100/i.test(line))continue;
-      const m=line.match(/(?:netto(?:füllmenge)?|inhalt|füllmenge|menge)?[^\d]{0,12}(\d{1,4}(?:[.,]\d{1,3})?)\s*(kg|g|mg|l|ml|cl|dl)\b/i);
-      if(m){let q=Number(m[1].replace(',','.')),u=m[2].toLowerCase();if(u==='mg'){q/=1000;u='g'}if(u==='cl'){q*=10;u='ml'}if(u==='dl'){q*=100;u='ml'}if(q>0&&q<100000&&['g','kg','ml','l'].includes(u))weights.push({q,u,priority:/netto|inhalt|füllmenge|menge/i.test(line)?2:1});}
+      if(skip.test(line))continue;
+      const m=line.match(/(\d{1,4}(?:[.,]\d{1,3})?)\s*(kg|g|mg|l|ml|cl|dl)\b/i);
+      if(m)addWeight(m[1],m[2],/netto|net\s*(?:weight|wt)|inhalt|füllmenge|gewicht/i.test(line)?4:1);
     }
-    weights.sort((a,b)=>b.priority-a.priority);
+    weights.sort((a,b)=>b.priority-a.priority||b.q-a.q);
     return {name:nameCandidate,weight:weights[0]||null};
   }
   function nameScore(s){return Math.min(s.length,32)+(/^[A-ZÄÖÜ]/.test(s)?3:0)-(s.split(' ').length>7?12:0)}
