@@ -73,6 +73,7 @@
     return {name:nameCandidate,weight:weights[0]||null};
   }
   function nameScore(s){return Math.min(s.length,32)+(/^[A-ZÄÖÜ]/.test(s)?3:0)-(s.split(' ').length>7?12:0)}
+  function fileAsDataURL(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>typeof reader.result==='string'?resolve(reader.result):reject(Error('Foto konnte nicht gelesen werden.'));reader.onerror=()=>reject(reader.error||Error('Foto konnte nicht gelesen werden.'));reader.readAsDataURL(file);});}
   input.onchange=async e=>{
     const files=Array.from(e.target.files||[]);
     if(!files.length)return;
@@ -83,7 +84,7 @@
       const worker=await getWorker();let allText='',foundBarcode='';
       for(let i=0;i<files.length;i++){
         result.textContent='Lese Foto '+(i+1)+' von '+files.length+'…';
-        const out=await worker.recognize(files[i]);allText+='\n'+(out.data.text||'');
+        const dataUrl=await fileAsDataURL(files[i]);const out=await worker.recognize(dataUrl);allText+='\n'+(out.data.text||'');
         if(!foundBarcode&&'BarcodeDetector'in window){try{const fmts=await BarcodeDetector.getSupportedFormats?.(),wanted=['ean_13','ean_8','upc_a','upc_e','code_128'],supported=fmts?.filter(x=>wanted.includes(x));const codes=await new BarcodeDetector(supported?.length?{formats:supported}:{}).detect(files[i]);foundBarcode=codes.find(c=>/^\d{8,14}$/.test(c.rawValue))?.rawValue||''}catch(_){}}
       }
       const parsed=parseText(allText);
