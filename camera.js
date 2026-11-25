@@ -35,10 +35,59 @@
       status.textContent='Richte die Kamera auf den Barcode und halte das Handy ruhig.'; scan();
     } catch(e) { stop(); say(e.name==='NotAllowedError'?'Kamerazugriff abgelehnt. Bitte Kamera für die App freigeben.':'Kamera konnte nicht geöffnet werden: '+(e.message||e),true); }
   };
-  const name=document.getElementById('name');
-  const label=document.createElement('label'); label.textContent='Artikelnamen vom Etikett vorschlagen (wenn Browser es unterstützt)';
-  const input=document.createElement('input'); input.type='file'; input.accept='image/*'; input.setAttribute('capture','environment');
-  const note=document.createElement('small'); note.textContent='Der Vorschlag muss vor dem Speichern geprüft werden.';
-  name.insertAdjacentElement('afterend',label); label.after(input,note);
-  input.onchange=async e=>{ const f=e.target.files?.[0]; if(!f)return; try { if(!('TextDetector' in window)) throw Error('Dieser Browser unterstützt keine lokale Texterkennung. Bitte den Namen eintippen.'); const image=await createImageBitmap(f); try { const lines=await new TextDetector().detect(image), text=lines.map(x=>(x.rawValue||'').trim()).filter(Boolean); if(!text.length) throw Error('Kein lesbarer Name erkannt. Etikett scharf und nah fotografieren.'); name.value=text.sort((a,b)=>b.length-a.length)[0].slice(0,150); name.dispatchEvent(new Event('input',{bubbles:true})); say('Namensvorschlag eingefügt – bitte prüfen.'); } finally { image.close(); } } catch(err) { say(err.message||String(err),true); } finally { e.target.value=''; } };
+  const name=$('name');
+  const label=document.createElement('label'); label.textContent='Bis zu 5 Produktfotos aus der Galerie auswählen – Name, Barcode und Inhalt erkennen';
+  const input=document.createElement('input'); input.type='file'; input.accept='image/*'; input.multiple=true;
+  const note=document.createElement('small'); note.textContent='Die Fotos werden auf diesem Gerät ausgelesen und nicht als Artikelfoto gespeichert. Erkannte Angaben bitte kontrollieren.';
+  const result=document.createElement('small'); result.setAttribute('aria-live','polite');
+  name.insertAdjacentElement('afterend',label); label.after(input,note,result);
+  let ocrWorker=null, ocrLoading=null;
+  async function getWorker(){
+    if(ocrWorker)return ocrWorker;
+    if(!ocrLoading)ocrLoading=(async()=>{
+      if(!window.Tesseract){result.textContent='Lade die kostenlose deutsche Texterkennung (einmalig Internet nötig)…'; await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';s.onload=resolve;s.onerror=()=>reject(Error('Texterkennung konnte nicht geladen werden. Internetverbindung prüfen.'));document.head.append(s)});}
+      ocrWorker=await Tesseract.createWorker(['deu','eng'],1,{logger:m=>{if(m.status==='recognizing text')result.textContent='Foto wird gelesen: '+Math.round((m.progress||0)*100)+'%'}});
+      return ocrWorker;
+    })();
+    try{return await ocrLoading}catch(e){ocrLoading=null;throw e}
+  }
+  const skip=/zutaten|nährwert|naehrwert|fett|kohlenhydrat|zucker|eiweiß|protein|salz|hersteller|anschrift|mindestens haltbar|kühl|kuehl|lagerung|portion|je 100|pro 100|www.|https?:|gmbh/i;
+  function parseText(text){
+    const lines=text.split(/[\r\n]+/).map(x=>x.replace(/\s+/g,' ').trim()).filter(Boolean);
+    const names=lines.filter(x=>x.length>=3&&x.length<=65&&/[a-zäöü]/i.test(x)&&!/^\d+[\d\s.,/-]*$/.test(x)&&!skip.test(x));
+    const nameCandidate=names.sort((a,b)=>nameScore(b)-nameScore(a))[0]||'';
+    const weights=[];
+    for(const line of lines){
+      if(/nährwert|naehrwert|fett|kohlenhydrat|zucker|eiweiß|protein|salz|je 100|pro 100/i.test(line))continue;
+      const m=line.match(/(?:netto(?:füllmenge)?|inhalt|füllmenge|menge)?[^\d]{0,12}(\d{1,4}(?:[.,]\d{1,3})?)\s*(kg|g|mg|l|ml|cl|dl)\b/i);
+      if(m){let q=Number(m[1].replace(',','.')),u=m[2].toLowerCase();if(u==='mg'){q/=1000;u='g'}if(u==='cl'){q*=10;u='ml'}if(u==='dl'){q*=100;u='ml'}if(q>0&&q<100000&&['g','kg','ml','l'].includes(u))weights.push({q,u,priority:/netto|inhalt|füllmenge|menge/i.test(line)?2:1});}
+    }
+    weights.sort((a,b)=>b.priority-a.priority);
+    return {name:nameCandidate,weight:weights[0]||null};
+  }
+  function nameScore(s){return Math.min(s.length,32)+(/^[A-ZÄÖÜ]/.test(s)?3:0)-(s.split(' ').length>7?12:0)}
+  input.onchange=async e=>{
+    const files=Array.from(e.target.files||[]);e.target.value='';
+    if(!files.length)return;
+    if(files.length>5){say('Bitte höchstens 5 Fotos auf einmal auswählen.',true);return;}
+    if(name.disabled){say('Texterkennung ist nur beim Anlegen eines neuen Artikels verfügbar.',true);return;}
+    try{
+      const worker=await getWorker();let allText='',foundBarcode='';
+      for(let i=0;i<files.length;i++){
+        result.textContent='Lese Foto '+(i+1)+' von '+files.length+'…';
+        const image=await createImageBitmap(files[i]);
+        try{
+          const out=await worker.recognize(image);allText+='\n'+(out.data.text||'');
+          if(!foundBarcode&&'BarcodeDetector'in window){try{const fmts=await BarcodeDetector.getSupportedFormats?.(),wanted=['ean_13','ean_8','upc_a','upc_e','code_128'],supported=fmts?.filter(x=>wanted.includes(x));const codes=await new BarcodeDetector(supported?.length?{formats:supported}:{}).detect(image);foundBarcode=codes.find(c=>/^\d{8,14}$/.test(c.rawValue))?.rawValue||''}catch(_){}}
+        }finally{image.close()}
+      }
+      const parsed=parseText(allText);
+      if(parsed.name){name.value=parsed.name;name.dispatchEvent(new Event('input',{bubbles:true}))}
+      if(parsed.weight){$('quantity').value=String(parsed.weight.q).replace('.',',');$('unit').value=parsed.weight.u;$('quantity').dispatchEvent(new Event('input',{bubbles:true}))}
+      if(foundBarcode&&!$('ean').disabled&&!$('ean').value){$('ean').value=foundBarcode;}
+      const found=[parsed.name?'Artikelname':'',parsed.weight?'Inhalt/Gewicht':'',foundBarcode?'Barcode':''].filter(Boolean);
+      result.textContent=found.length?'Vorschläge eingefügt: '+found.join(', ')+'. Bitte prüfen.':'Text erkannt, aber Name oder Inhalt nicht sicher gefunden. Bitte Felder prüfen und ergänzen.';
+      say('Foto-Erkennung abgeschlossen – Angaben bitte vor dem Speichern kontrollieren.');
+    }catch(err){result.textContent='';say(err.message||String(err),true)}
+  };
 })();
