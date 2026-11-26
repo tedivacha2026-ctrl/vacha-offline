@@ -4,7 +4,7 @@
   const $ = id => document.getElementById(id);
   let workerPromise = null;
   const ignored = /zutaten|nährwert|naehrwert|fett|kohlenhydrat|zucker|protein|eiweiß|salz|sodium|kcal|kj|energie|hersteller|anschrift|lagerung|portion|je 100|pro 100|www\.|gmbh|ingredient|nutri|warning|recycling/i;
-  const uiLine = /produktfotos|aus galerie|galerie wählen|foto aufnehmen|artikelname|vacha offline|netz verfügbar|abgleich|etikett kopieren|lokal speichern|produktdaten|barcode \/ interne nummer|produktfoto|gemini erkennen/i;
+  const uiLine = /produktfotos|aus galerie|galerie wählen|foto aufnehmen|artikelname|vacha offline|netz verfügbar|abgleich|etikett kopieren|lokal speichern|produktdaten|barcode \/ interne nummer|produktfoto|gemini erkennen|preis|pfand|inhalt|einheit|barcode|mhd|datum/i;
 
   function report(id, text) {
     const node = $(id);
