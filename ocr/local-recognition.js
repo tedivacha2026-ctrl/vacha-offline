@@ -87,10 +87,14 @@
 
     const dates = [];
     const datePattern = /(?<!\d)(\d{1,2}[.\/-]\d{1,2}[.\/-](?:20\d{2}|\d{2})|\d{6})(?!\d)/g;
-    for (const photo of photos) {
-      if (photo.role !== 'date' && !/mhd|mindestens haltbar|best before|bb[de]|exp(?:iry)?|zu verbrauchen bis/i.test(text)) continue;
+    const dateMarker = /mhd|mindestens haltbar|best before|bb[de]|exp(?:iry)?|zu verbrauchen bis/i;
+    const hasDedicatedDatePhoto = photos.some(photo => photo.role === 'date');
+    for (let i = 0; i < lines.length; i++) {
+      const nearby = lines.slice(Math.max(0, i - 2), Math.min(lines.length, i + 3)).join(' ');
+      if (!hasDedicatedDatePhoto && !dateMarker.test(nearby)) continue;
+      datePattern.lastIndex = 0;
       let match;
-      while ((match = datePattern.exec(text))) {
+      while ((match = datePattern.exec(lines[i]))) {
         const date = parseDate(match[1]);
         if (date && !dates.includes(date)) dates.push(date);
       }
