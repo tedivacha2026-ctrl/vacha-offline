@@ -4,6 +4,7 @@
   const $ = id => document.getElementById(id);
   let workerPromise = null;
   const ignored = /zutaten|nährwert|naehrwert|fett|kohlenhydrat|zucker|protein|eiweiß|salz|sodium|kcal|kj|energie|hersteller|anschrift|lagerung|portion|je 100|pro 100|www\.|gmbh|ingredient|nutri|warning|recycling/i;
+  const uiLine = /produktfotos|aus galerie|galerie wählen|foto aufnehmen|artikelname|vacha offline|netz verfügbar|abgleich|etikett kopieren|lokal speichern|produktdaten|barcode \/ interne nummer|produktfoto|gemini erkennen/i;
 
   function report(id, text) {
     const node = $(id);
@@ -55,7 +56,7 @@
     const nameLines = lines.map((line, index) => {
       const letters = (line.match(/[a-zäöüß]/gi) || []).length;
       const words = line.match(/[a-zäöüß][a-zäöüß'&-]*/gi) || [];
-      if (line.length < 4 || line.length > 58 || letters < 7 || words.length < 2 || ignored.test(line) || /\b(?:g|kg|ml|cl|dl|l|kcal|kj)\b/i.test(line)) return null;
+      if (line.length < 4 || line.length > 58 || letters < 7 || words.length < 2 || ignored.test(line) || uiLine.test(line) || /\b(?:g|kg|ml|cl|dl|l|kcal|kj)\b/i.test(line)) return null;
       const digitCount = (line.match(/\d/g) || []).length;
       if (digitCount > 2 || letters / Math.max(1, line.replace(/\s/g, '').length) < .58) return null;
       const score = Math.min(letters, 28) + (words.length >= 2 && words.length <= 5 ? 7 : 0) - Math.max(0, words.length - 5) * 5 - digitCount * 3;
