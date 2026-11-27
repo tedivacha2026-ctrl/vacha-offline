@@ -170,7 +170,7 @@
 
   async function readWithDateModel(data, focused = false) {
     try {
-      const { readDateLine } = await import('./date-model/recognize.mjs?v=43');
+      const { readDateLine } = await import('./date-model/recognize.mjs?v=44');
       const reads = photoReads(data);
       if (reads.model?.length) return reads.model;
       const dates = await readDateLine(data, parseDate, focused, text => parseDates([text], false, true));

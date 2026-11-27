@@ -19,7 +19,7 @@ async function getModel() {
   return model;
 }
 
-async function readCrop(bitmap, rect, session, characters) {
+async function readCrop(bitmap, rect, session, characters, minimumWidth = 192) {
   const [left, top, right, bottom] = rect;
   const width = (right - left) * bitmap.width, height = (bottom - top) * bitmap.height;
   const canvas = document.createElement('canvas');
@@ -27,7 +27,7 @@ async function readCrop(bitmap, rect, session, characters) {
   canvas.width = Math.min(768, Math.ceil(canvas.height * width / height));
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(bitmap, left * bitmap.width, top * bitmap.height, width, height, 0, 0, canvas.width, canvas.height);
-  const paddedWidth = Math.max(192, Math.ceil(canvas.width / 32) * 32);
+  const paddedWidth = Math.max(minimumWidth, Math.ceil(canvas.width / 32) * 32);
   const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
   const plane = paddedWidth * canvas.height, input = new Float32Array(3 * plane);
   for (let y = 0; y < canvas.height; y++) {
@@ -63,14 +63,14 @@ async function readCrop(bitmap, rect, session, characters) {
   }
 }
 
-async function readDateFromCrops(image, crops, session, characters, parseDate) {
+async function readDateFromCrops(image, crops, session, characters, parseDate, trained = false) {
   const candidates = new Map();
   for (const crop of crops) {
-    const { text, confidence } = await readCrop(image, crop, session, characters);
+    const { text, confidence } = await readCrop(image, crop, session, characters, trained ? 320 : 192);
     // Require a valid date with both separators. Compare overlapping lines
     // before suggesting a date if the individual characters were uncertain.
     const match = text.trim().match(/^(\d{2}[.\/-]\d{2}[.\/-](?:20\d{2}|\d{2}))(?!\d)/);
-    const date = match && confidence >= 0.5 && parseDate(match[1]);
+    const date = match && confidence >= (trained ? 0.45 : 0.5) && parseDate(match[1]);
     if (date) {
       const candidate = candidates.get(date) || { count: 0, confidence: 0 };
       candidate.count++;
@@ -80,7 +80,9 @@ async function readDateFromCrops(image, crops, session, characters, parseDate) {
   }
   if (candidates.size !== 1) return [];
   const [[date, candidate]] = candidates;
-  return candidate.count >= 2 || candidate.confidence >= 0.85 ? [date] : [];
+  const verified = trained ? candidate.count >= 2 && candidate.confidence >= 0.75 :
+    candidate.count >= 2 || candidate.confidence >= 0.85;
+  return verified ? [date] : [];
 }
 
 function turnedImage(bitmap, degrees) {
@@ -142,6 +144,10 @@ export async function readDateLine(data, parseDate, focused = false, parseLabell
     }
     if (marked.size) return [...marked];
     if (unmarked.size) return [...unmarked];
+    const { locateDateStamps } = await import('./date-localizer.mjs');
+    const proposals = await locateDateStamps(bitmap).catch(() => []);
+    const localized = await readDateFromCrops(bitmap, proposals, session, characters, parseDate, true);
+    if (localized.length) return localized;
     if (focused) {
       const dates = await attempt(bitmap, extraCrops);
       if (dates.length) return dates;
