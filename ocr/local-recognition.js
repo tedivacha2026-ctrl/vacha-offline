@@ -87,20 +87,23 @@
       }
     });
 
-    const dates = [];
-    const datePattern = /(?<!\d)(\d{1,2}[.\/-]\d{1,2}[.\/-](?:20\d{2}|\d{2})|\d{6})(?!\d)/g;
-    const dateMarker = /mhd|mindestens haltbar|best before|bb[de]|exp(?:iry)?|zu verbrauchen bis/i;
-    const hasDedicatedDatePhoto = photos.some(photo => photo.role === 'date');
+    const markedDates = new Set(), stampDates = new Set();
+    const datePattern = /(?<!\d)(\d{1,2}\s*[.\/-]\s*\d{1,2}\s*[.\/-]\s*(?:20\d{2}|\d{2})|\d{8}|\d{6})(?!\d)/g;
+    const dateMarker = /\b(?:mhd|bb[de]|exp(?:iry)?)\b|mindestens\s+haltbar|best\s+before|zu\s+verbrauchen\s+bis/i;
+    const otherMarker = /\b(?:mfg|prod|lot|charge)\b|hergestellt|abgefüllt|production\s+date/i;
+    const isDatePhoto = photos.some(photo => photo.role === 'date');
     for (let i = 0; i < lines.length; i++) {
-      const nearby = lines.slice(Math.max(0, i - 2), Math.min(lines.length, i + 3)).join(' ');
-      if (!hasDedicatedDatePhoto && !dateMarker.test(nearby)) continue;
-      datePattern.lastIndex = 0;
-      let match;
-      while ((match = datePattern.exec(lines[i]))) {
-        const date = parseDate(match[1]);
-        if (date && !dates.includes(date)) dates.push(date);
+      const line = lines[i], previous = lines[i - 1] || '';
+      const marked = dateMarker.test(line) || (!otherMarker.test(line) && dateMarker.test(previous));
+      if (!marked && (!isDatePhoto || otherMarker.test(line) || (otherMarker.test(previous) && !/\d/.test(previous)))) continue;
+      for (const match of line.matchAll(datePattern)) {
+        let raw = match[1].replace(/\s/g, '');
+        if (/^\d{4}20\d{2}$/.test(raw)) raw = raw.replace(/^(\d{2})(\d{2})(\d{4})$/, '$1.$2.$3');
+        const date = parseDate(raw);
+        if (date) (marked ? markedDates : stampDates).add(date);
       }
     }
+    const dates = [...(markedDates.size ? markedDates : stampDates.size === 1 ? stampDates : [])];
 
     const prices = [], deposits = [];
     for (let i = 0; i < lines.length; i++) {
@@ -270,7 +273,8 @@
     });
     label();
     const note = status(result, changed);
-    report('localOcrStatus', note);
+    const mhdHint = photos.some(p => p.role === 'date') && !result.values.dates ? ' Kein eindeutiges MHD gefunden. Bitte den Datumsstempel enger fotografieren oder das Datum eintragen.' : '';
+    report('localOcrStatus', note + mhdHint);
     if (result.known && !editing) renderPhotoMatches([], active, result.known);
     if (result.conflict || editing || $('ean').value.trim()) return;
     const currentName = $('name').value;
@@ -281,7 +285,7 @@
     }).catch(() => null);
     if (!activeQuery()) return;
     const categoryName = category?.confidence >= 0.65 ? category.name : '';
-    report('localOcrStatus', note + (categoryName ? ' Bild-KI: Produktgruppe „' + categoryName + '“.' : ''));
+    report('localOcrStatus', note + mhdHint + (categoryName ? ' Bild-KI: Produktgruppe „' + categoryName + '“.' : ''));
     if (result.query) await searchCatalogSuggestions(result.query, {
       category: categoryName ? category.label : undefined,
       active: activeQuery,
