@@ -25,3 +25,20 @@ Daten und Rechte
 - Die Datenbank steht unter ODbL; Bildlizenzen können je Foto abweichen. Bei Weitergabe von Daten/Bildern Lizenz und Namensnennung beachten.
 - Der lokale Klassifikator wurde mit rund 500 öffentlichen Bildern trainiert. Die vorläufige Validierung lag bei rund 74 Prozent; dies ist noch keine Feldprüfung.
 - Preis, Pfand und MHD bitte immer am tatsächlichen Produkt oder TEDi-Preisschild prüfen.
+
+Produkterkennung und Lernbeispiele
+
+1. „Neuer Artikel“ öffnen. Vorderseite, Barcode und Nettofüllmenge möglichst
+   scharf fotografieren. Fotos desselben Produkts gemeinsam auswählen.
+2. „Lokal aus Fotos erkennen“ wählen. Barcode und Verpackungstext werden auf
+   dem Gerät ausgewertet. Bei Internetzugang kann die App Barcode und/oder
+   gelesenen Produktnamen in öffentlichen Artikeldatenbanken nachschlagen.
+3. Vorschläge mit der Verpackung vergleichen und die Formularfelder bei
+   Bedarf korrigieren. In der Sammelerfassung gibt es dieselbe lokale
+   Erkennung pro Gruppe. Gemini ist nach Bestätigung separat verfügbar.
+4. „Korrigierte Daten und Fotos als Lernbeispiel speichern“ wählen.
+   In der Sammelerfassung gibt es dafür eine Schaltfläche pro Gruppe.
+   „Offene Aufträge“ → „Lokale Lernbeispiele exportieren“ lädt eine JSON-Datei
+   mit geprüften Produktdaten und eingebetteten Fotos herunter.
+5. Beim Speichern eines Artikels bleiben Fotos standardmäßig auf diesem
+   Gerät. Die Fotosynchronisierung für das Team kann separat gewählt werden.
