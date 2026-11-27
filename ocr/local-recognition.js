@@ -58,7 +58,7 @@
     const nameLines = lines.map((line, index) => {
       const letters = (line.match(/[a-zäöüß]/gi) || []).length;
       const words = line.match(/[a-zäöüß][a-zäöüß'&-]*/gi) || [];
-      if (line.length < 4 || line.length > 58 || letters < 5 || !words.length || ignored.test(line) || uiLine.test(line) || /\b(?:g|kg|ml|cl|dl|l|kcal|kj)\b/i.test(line)) return null;
+      if (line.length < 4 || line.length > 58 || letters < 4 || !words.length || ignored.test(line) || uiLine.test(line) || /\b(?:g|kg|ml|cl|dl|l|kcal|kj)\b/i.test(line)) return null;
       const digitCount = (line.match(/\d/g) || []).length;
       if (digitCount > 2 || letters / Math.max(1, line.replace(/\s/g, '').length) < .58) return null;
       const score = Math.min(letters, 28) + (words.length >= 2 && words.length <= 5 ? 7 : 0) - (words.length === 1 ? 6 : 0) - Math.max(0, words.length - 5) * 5 - digitCount * 3;
