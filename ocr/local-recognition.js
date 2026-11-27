@@ -244,6 +244,11 @@
     try {
       $('photoDateChoices').hidden = true;
       report('localOcrStatus', 'Lese Datumsstempel …');
+      const learned = await window.vachaLearnedPhotoDate(data);
+      if (learned) {
+        if (active()) applyPhotoDate(learned);
+        return;
+      }
       const worker = await getWorker('localOcrStatus');
       const {data: result} = await worker.recognize(data);
       let dates = parseDates(result.text.split(/\r?\n/).map(line => line.trim()).filter(Boolean), true, false, true);
@@ -284,6 +289,8 @@
     const worker = await workerReady;
     for (const [i, photo] of photos.entries()) {
       report(statusId, 'Lokal: lese Foto ' + (i + 1) + ' von ' + photos.length + ' …');
+      const learned = await window.vachaLearnedPhotoDate(photo.data);
+      if (learned) fields.dates.push(learned);
       let text;
       try {
         if (!worker) throw Error();
@@ -298,11 +305,11 @@
         if (parsed.name) names.push({ name: parsed.name, score: photo.role === 'front' ? 4 : photo.role === 'code' ? 0 : 2 });
         for (const weight of parsed.weights) weights.push({ ...weight, score: weight.score + (photo.role === 'front' ? 2 : 0) });
       }
-      if (!parsed.dates.length && photo.role === 'date') {
+      if (!learned && !parsed.dates.length && photo.role === 'date') {
         const dates = await retryStamp(worker, photo.data).catch(() => []);
         if (dates.length === 1) parsed.dates = dates;
       }
-      fields.dates.push(...parsed.dates);
+      if (!learned) fields.dates.push(...parsed.dates);
       fields.price ||= parsed.price;
       fields.deposit ||= parsed.deposit;
     }
