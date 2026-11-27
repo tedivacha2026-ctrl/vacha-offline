@@ -54,7 +54,7 @@
   }
 
   function parseDates(lines, isDatePhoto) {
-    const markedDates = new Set(), stampDates = new Set();
+    const markedDates = new Set(), stampDates = new Set(), separatedDates = new Set();
     const datePattern = /(?<!\d)(\d{1,2}\s*[.\/-]\s*\d{1,2}\s*[.\/-]\s*(?:20\d{2}|\d{2})|\d{8}|\d{6})(?!\d)/g;
     const dateMarker = /\b(?:mhd|bb[de]|exp(?:iry)?)\b|mindestens\s+haltbar|best\s+before|zu\s+verbrauchen\s+bis/i;
     const otherMarker = /\b(?:mfg|prod|lot|charge)\b|hergestellt|abgefüllt|production\s+date/i;
@@ -66,10 +66,11 @@
         let raw = match[1].replace(/\s/g, '');
         if (/^\d{4}20\d{2}$/.test(raw)) raw = raw.replace(/^(\d{2})(\d{2})(\d{4})$/, '$1.$2.$3');
         const date = parseDate(raw);
-        if (date) (marked ? markedDates : stampDates).add(date);
+        if (date) (marked ? markedDates : /[.\/-]/.test(match[1]) ? separatedDates : stampDates).add(date);
       }
     }
-    return [...(markedDates.size ? markedDates : stampDates.size === 1 ? stampDates : [])];
+    const candidates = separatedDates.size ? separatedDates : stampDates;
+    return [...(markedDates.size ? markedDates : candidates.size === 1 ? candidates : [])];
   }
 
   function parseText(text, photos) {
@@ -139,8 +140,8 @@
     try {
       // Try sparse text on a larger, higher-contrast image. The lower crop
       // gives small stamps more pixels and reduces surrounding packaging text.
-      for (const top of [0, 0.42]) {
-        const y = Math.round(bitmap.height * top), height = bitmap.height - y;
+      for (const [top, bottom, joinDots] of [[0, 1, false], [0.42, 1, false], [0.42, 0.78, true], [0, 1, true]]) {
+        const y = Math.round(bitmap.height * top), height = Math.max(1, Math.round(bitmap.height * bottom) - y);
         const scale = Math.min(3, 1800 / Math.max(bitmap.width, height));
         const canvas = document.createElement('canvas');
         canvas.width = Math.round(bitmap.width * scale);
@@ -148,6 +149,22 @@
         const ctx = canvas.getContext('2d');
         ctx.filter = 'grayscale(1) contrast(2.6)';
         ctx.drawImage(bitmap, 0, y, bitmap.width, height, 0, 0, canvas.width, canvas.height);
+        if (joinDots) {
+          // Darken each pixel with its neighbors so the separated ink dots form strokes.
+          const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const source = new Uint8ClampedArray(pixels.data);
+          const stride = canvas.width * 4;
+          const radius = Math.max(1, Math.min(3, Math.round(scale)));
+          for (let row = radius; row < canvas.height - radius; row++) {
+            for (let col = radius; col < canvas.width - radius; col++) {
+              const i = row * stride + col * 4;
+              const value = Math.min(source[i], source[i - 4 * radius], source[i + 4 * radius],
+                source[i - stride * radius], source[i + stride * radius]);
+              pixels.data[i] = pixels.data[i + 1] = pixels.data[i + 2] = value;
+            }
+          }
+          ctx.putImageData(pixels, 0, 0);
+        }
         try {
           await worker.setParameters({ tessedit_pageseg_mode: '11' });
           const {data: result} = await worker.recognize(canvas);
