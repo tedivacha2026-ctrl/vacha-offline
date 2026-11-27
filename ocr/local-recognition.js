@@ -56,13 +56,29 @@
   function parseDates(lines, isDatePhoto, requireSeparators = false) {
     const markedDates = new Set(), stampDates = new Set(), separatedDates = new Set();
     const datePattern = /(?<!\d)(\d{1,2}\s*[.\/-]\s*\d{1,2}\s*[.\/-]\s*(?:20\d{2}|\d{2})|\d{8}|\d{6})(?!\d)/g;
-    const dateMarker = /\b(?:mhd|bb[de]|exp(?:iry)?)\b|mindestens\s+haltbar|best\s+before|zu\s+verbrauchen\s+bis/i;
+    const bestBefore = /\b(?:mhd|bb[de]?)(?:[\s-]*date)?\b|mindestens\s+haltbar|best\s+before/i;
+    const dateMarker = new RegExp(bestBefore.source + '|\\bexp(?:iry)?\\b|zu\\s+verbrauchen\\s+bis', 'i');
+    const monthPattern = /(?<![\d.\/-])(0?[1-9]|1[0-2])\s*[.\/-]\s*(20\d{2})(?![\d.\/-])/g;
     const otherMarker = /\b(?:mfg|prod|lot|charge)\b|hergestellt|abgefüllt|production\s+date/i;
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i], previous = lines[i - 1] || '';
-      const marked = dateMarker.test(line) || (!otherMarker.test(line) && dateMarker.test(previous));
+      const label = line.match(dateMarker);
+      const previousLabel = previous.match(dateMarker);
+      const followsLabel = previousLabel && !/\d/.test(previous.slice(previousLabel.index + previousLabel[0].length));
+      const marked = !!label || (!otherMarker.test(line) && followsLabel);
       if (!marked && (!isDatePhoto || otherMarker.test(line) || (otherMarker.test(previous) && !/\d/.test(previous)))) continue;
-      for (const match of line.matchAll(datePattern)) {
+      const value = label ? line.slice(label.index + label[0].length).split(otherMarker)[0] : line;
+      const monthOnly = (label && bestBefore.test(label[0])) ||
+        (!label && marked && bestBefore.test(previousLabel[0]));
+      if (monthOnly) {
+        const compact = value.replace(/\s*([.\/-])\s*/g, '$1');
+        for (const match of compact.matchAll(monthPattern)) {
+          const month = Number(match[1]), year = Number(match[2]);
+          const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+          markedDates.add(lastDay + '.' + String(month).padStart(2, '0') + '.' + year);
+        }
+      }
+      for (const match of value.matchAll(datePattern)) {
         if (requireSeparators && !/[.\/-]/.test(match[1])) continue;
         let raw = match[1].replace(/\s/g, '');
         if (/^\d{4}20\d{2}$/.test(raw)) raw = raw.replace(/^(\d{2})(\d{2})(\d{4})$/, '$1.$2.$3');
