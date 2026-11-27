@@ -4,6 +4,22 @@
   const $ = id => document.getElementById(id);
   let running = false, workerStatus = '', pendingDraft = null, automaticTimer;
   let workerPromise = null;
+  // Keep a few exact images in memory so re-reading a photo in this session
+  // can reuse OCR without preserving any extra copies across browser restarts.
+  const recentPhotos = new Map();
+  function photoReads(data) {
+    const reads = recentPhotos.get(data) || {};
+    recentPhotos.delete(data);
+    recentPhotos.set(data, reads);
+    if (recentPhotos.size > 6) recentPhotos.delete(recentPhotos.keys().next().value);
+    return reads;
+  }
+
+  async function readPhotoText(worker, data) {
+    const reads = photoReads(data);
+    if (reads.text === undefined) reads.text = (await worker.recognize(data)).data.text || '';
+    return reads.text;
+  }
   const ignored = /zutaten|nährwert|naehrwert|fett|kohlenhydrat|zucker|protein|eiweiß|salz|sodium|kcal|kj|energie|hersteller|anschrift|lagerung|portion|je 100|pro 100|www\.|gmbh|ingredient|nutri|warning|recycling/i;
   const uiLine = /produktfotos|aus galerie|galerie wählen|foto aufnehmen|artikelname|vacha offline|netz verfügbar|abgleich|etikett kopieren|lokal speichern|produktdaten|barcode \/ interne nummer|produktfoto|gemini erkennen|preis|pfand|inhalt|einheit|barcode|mhd|datum/i;
 
@@ -154,8 +170,12 @@
 
   async function readWithDateModel(data, focused = false) {
     try {
-      const { readDateLine } = await import('./date-model/recognize.mjs?v=41');
-      return await readDateLine(data, parseDate, focused, text => parseDates([text], false, true));
+      const { readDateLine } = await import('./date-model/recognize.mjs?v=43');
+      const reads = photoReads(data);
+      if (reads.model?.length) return reads.model;
+      const dates = await readDateLine(data, parseDate, focused, text => parseDates([text], false, true));
+      if (dates.length) reads.model = dates;
+      return dates;
     } catch (_) {
       // The standard OCR fallback remains available on older browsers.
       return [];
@@ -163,8 +183,10 @@
   }
 
   async function retryStamp(worker, data) {
+    const reads = photoReads(data);
+    if (reads.stamp?.length) return reads.stamp;
     const modelDates = await readWithDateModel(data, true);
-    if (modelDates.length) return modelDates;
+    if (modelDates.length) return (reads.stamp = modelDates);
     const bitmap = await createImageBitmap(await (await fetch(data)).blob());
     try {
       // Try sparse text on a larger, higher-contrast image. The lower crop
@@ -218,7 +240,7 @@
           await worker.setParameters({ tessedit_pageseg_mode: mode });
           const {data: result} = await worker.recognize(canvas);
           const dates = parseDates(result.text.split(/\r?\n/).map(line => line.trim()).filter(Boolean), true, mode === '7');
-          if (dates.length) return dates;
+          if (dates.length) return (reads.stamp = dates);
         } finally { await worker.setParameters({ tessedit_pageseg_mode: '3' }); }
       }
       return [];
@@ -250,8 +272,8 @@
         return;
       }
       const worker = await getWorker('localOcrStatus');
-      const {data: result} = await worker.recognize(data);
-      let dates = parseDates(result.text.split(/\r?\n/).map(line => line.trim()).filter(Boolean), true, false, true);
+      const text = await readPhotoText(worker, data);
+      let dates = parseDates(text.split(/\r?\n/).map(line => line.trim()).filter(Boolean), true, false, true);
       if (!dates.length) dates = await retryStamp(worker, data);
       if (!active()) return;
       if (!dates.length) {
@@ -280,7 +302,7 @@
     } finally { running = false; if (pendingDraft) scheduleAutomatic(); }
   };
 
-  async function recognize(photos, statusId, scanBarcodes) {
+  async function recognize(photos, statusId, scanBarcodes, needsDate) {
     if (!photos.length || photos.length > 5) throw Error('Bitte 1 bis 5 Fotos pro Artikel auswählen.');
     const workerReady = getWorker(statusId).catch(() => null);
     const barcodeHits = new Set(await scanBarcodes), printedCodes = new Set(), names = [], weights = [];
@@ -289,12 +311,13 @@
     const worker = await workerReady;
     for (const [i, photo] of photos.entries()) {
       report(statusId, 'Lokal: lese Foto ' + (i + 1) + ' von ' + photos.length + ' …');
-      const learned = await window.vachaLearnedPhotoDate(photo.data);
+      const learned = needsDate() ? await window.vachaLearnedPhotoDate(photo.data) : '';
       if (learned) fields.dates.push(learned);
+      if (photo.role === 'date' && (learned || !needsDate())) continue;
       let text;
       try {
         if (!worker) throw Error();
-        text = (await worker.recognize(photo.data)).data.text || '';
+        text = await readPhotoText(worker, photo.data);
       } catch (_) {
         ocrFailed = true;
         continue;
@@ -305,7 +328,7 @@
         if (parsed.name) names.push({ name: parsed.name, score: photo.role === 'front' ? 4 : photo.role === 'code' ? 0 : 2 });
         for (const weight of parsed.weights) weights.push({ ...weight, score: weight.score + (photo.role === 'front' ? 2 : 0) });
       }
-      if (!learned && !parsed.dates.length && photo.role === 'date') {
+      if (needsDate() && !learned && !parsed.dates.length && photo.role === 'date') {
         const dates = await retryStamp(worker, photo.data).catch(() => []);
         if (dates.length === 1) parsed.dates = dates;
       }
@@ -313,7 +336,7 @@
       fields.price ||= parsed.price;
       fields.deposit ||= parsed.deposit;
     }
-    if (!fields.dates.length && !photos.some(photo => photo.role === 'date')) {
+    if (needsDate() && !fields.dates.length && !photos.some(photo => photo.role === 'date')) {
       report(statusId, 'Prüfe die Produktfotos auf Datumsstempel …');
       const dates = new Set();
       for (const photo of photos) {
@@ -346,7 +369,7 @@
     return { known, result: Promise.resolve(known || S.catalog?.[code] || lookupCatalog(code)) };
   }
 
-  async function productData(photos, statusId, currentBarcode, active, showCatalog = () => {}) {
+  async function productData(photos, statusId, currentBarcode, active, { showCatalog = () => {}, showDate = () => {}, needsDate = () => true } = {}) {
     const scanBarcodes = Promise.all(photos.map(photo =>
       window.vachaBarcodeFromPhoto(photo.data, true))).then(results => results.flat());
     const nativeProduct = scanBarcodes.then(async hits => {
@@ -360,12 +383,13 @@
       return { code, known, product };
     }).catch(() => null);
 
-    const result = await recognize(photos, statusId, scanBarcodes);
+    const result = await recognize(photos, statusId, scanBarcodes, needsDate);
     const { fields, codes } = result;
     if (!active()) return null;
     const current = currentBarcode();
     const conflict = codes.length > 1 || (current && fields.barcode &&
       current.padStart(14, '0') !== fields.barcode.padStart(14, '0'));
+    if (!conflict && fields.dates) showDate(fields.dates);
     const code = conflict ? '' : current || fields.barcode;
     const early = code && await nativeProduct;
     const entry = code && early?.code !== code ? productByBarcode(code) : null;
@@ -454,15 +478,20 @@
       return true;
     });
     const earlyChanges = [];
-    const result = await productData(photos, 'localOcrStatus', () => $('ean').value.trim(), active, item => {
-      earlyChanges.push(...apply({ name: item.name, amount: item.quantity, unit: item.unit }));
-      if (earlyChanges.length) label();
+    const needsDate = () => !$('dates').value.trim();
+    const result = await productData(photos, 'localOcrStatus', () => $('ean').value.trim(), active, {
+      needsDate,
+      showDate: dates => earlyChanges.push(...apply({ dates })),
+      showCatalog: item => {
+        earlyChanges.push(...apply({ name: item.name, amount: item.quantity, unit: item.unit }));
+        if (earlyChanges.length) label();
+      }
     });
     if (!result || !active()) return;
     const changed = [...earlyChanges, ...apply(result.values)];
     label();
     const note = status(result, changed);
-    const mhdHint = photos.some(p => p.role === 'date') && !result.values.dates ? ' Kein eindeutiges MHD gefunden. Bitte das Datum vom Stempel in „Neue MHD“ eintragen.' : '';
+    const mhdHint = photos.some(p => p.role === 'date') && needsDate() ? ' Kein eindeutiges MHD gefunden. Bitte das Datum vom Stempel in „Neue MHD“ eintragen.' : '';
     report('localOcrStatus', note + mhdHint);
     if (result.known && !editing) renderPhotoMatches([], active, result.known);
     if (result.conflict || editing || $('ean').value.trim()) return;

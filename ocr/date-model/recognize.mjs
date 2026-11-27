@@ -27,7 +27,7 @@ async function readCrop(bitmap, rect, session, characters) {
   canvas.width = Math.min(768, Math.ceil(canvas.height * width / height));
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(bitmap, left * bitmap.width, top * bitmap.height, width, height, 0, 0, canvas.width, canvas.height);
-  const paddedWidth = Math.max(320, canvas.width);
+  const paddedWidth = Math.max(192, Math.ceil(canvas.width / 32) * 32);
   const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
   const plane = paddedWidth * canvas.height, input = new Float32Array(3 * plane);
   for (let y = 0; y < canvas.height; y++) {
