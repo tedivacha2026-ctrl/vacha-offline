@@ -1,6 +1,6 @@
 # Lokale OCR für Datumszeilen
 
-PP-OCRv4-Textzeilenerkennung aus RapidOCR ONNX Runtime 1.4.4
+PP-OCRv4-Texterkennung und Textzeilenerkennung aus RapidOCR ONNX Runtime 1.4.4
 (Apache-2.0). Die Zeichentabelle stammt aus den Metadaten der ONNX-Datei.
 Der Browser führt das Modell mit ONNX Runtime Web 1.22.0 (MIT) aus.
 

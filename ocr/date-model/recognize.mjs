@@ -106,13 +106,42 @@ const extraCrops = [0.18, 0.26, 0.34, 0.42, 0.50, 0.60, 0.68, 0.76, 0.84].flatMa
   [[0.22, center - 0.04, 0.50, center + 0.04], [0.24, center - 0.037, 0.50, center + 0.037],
     [0.06, center - 0.06, 0.50, center + 0.06], [0.43, center - 0.06, 0.91, center + 0.06]]);
 
-export async function readDateLine(data, parseDate, focused = false) {
+export async function readDateLine(data, parseDate, focused = false, parseLabelled = () => []) {
   const [session, characters] = await getModel();
   const bitmap = await createImageBitmap(await (await fetch(data)).blob());
   try {
     const attempt = (image, crops) => readDateFromCrops(image, crops, session, characters, parseDate);
     const direct = await attempt(bitmap, commonCrops(bitmap));
     if (direct.length) return direct;
+    const { locateTextLines } = await import('./text-lines.mjs');
+    const lines = await locateTextLines(bitmap).catch(() => []);
+    const marked = new Set(), unmarked = new Set();
+    for (const rect of lines) {
+      const result = await readCrop(bitmap, rect, session, characters);
+      const text = result.text.trim();
+      if (result.confidence < 0.5) continue;
+      for (const date of parseLabelled(text)) marked.add(date);
+      const fullDate = /^(\d{2}[.\/-]\d{2}[.\/-](?:20\d{2}|\d{2}))(?!\d)/;
+      const match = text.match(fullDate);
+      const date = match && parseDate(match[1]);
+      if (!date) continue;
+      if (result.confidence >= 0.85) {
+        unmarked.add(date);
+        continue;
+      }
+      // Re-read the first part of the detected line to exclude trailing lot codes.
+      const [left, top, right, bottom] = rect;
+      for (const fraction of [0.53, 0.63]) {
+        const prefix = await readCrop(bitmap, [left, top, left + (right - left) * fraction, bottom], session, characters);
+        const prefixDate = prefix.text.trim().match(fullDate);
+        if (prefix.confidence >= 0.5 && prefixDate && parseDate(prefixDate[1]) === date) {
+          unmarked.add(date);
+          break;
+        }
+      }
+    }
+    if (marked.size) return [...marked];
+    if (unmarked.size) return [...unmarked];
     if (focused) {
       const dates = await attempt(bitmap, extraCrops);
       if (dates.length) return dates;

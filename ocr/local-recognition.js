@@ -53,7 +53,7 @@
     return String(d).padStart(2, '0') + '.' + String(m).padStart(2, '0') + '.' + y;
   }
 
-  function parseDates(lines, isDatePhoto, requireSeparators = false) {
+  function parseDates(lines, isDatePhoto, requireSeparators = false, allowChoices = false) {
     const markedDates = new Set(), stampDates = new Set(), separatedDates = new Set();
     const datePattern = /(?<!\d)(\d{1,2}\s*[.\/-]\s*\d{1,2}\s*[.\/-]\s*(?:20\d{2}|\d{2})|\d{8}|\d{6})(?!\d)/g;
     const bestBefore = /\b(?:mhd|bb[de]?)(?:[\s-]*date)?\b|mindestens\s+haltbar|best\s+before/i;
@@ -87,7 +87,7 @@
       }
     }
     const candidates = separatedDates.size ? separatedDates : stampDates;
-    return [...(markedDates.size ? markedDates : candidates.size === 1 ? candidates : [])];
+    return [...(markedDates.size ? markedDates : (allowChoices || candidates.size === 1) ? candidates : [])];
   }
 
   function parseText(text, photos) {
@@ -124,7 +124,7 @@
       }
     });
 
-    const dates = parseDates(lines, photos.some(photo => photo.role === 'date'));
+    const dates = parseDates(lines, photos.some(photo => photo.role === 'date'), false, true);
 
     const prices = [], deposits = [];
     for (let i = 0; i < lines.length; i++) {
@@ -154,8 +154,8 @@
 
   async function readWithDateModel(data, focused = false) {
     try {
-      const { readDateLine } = await import('./date-model/recognize.mjs?v=40');
-      return await readDateLine(data, parseDate, focused);
+      const { readDateLine } = await import('./date-model/recognize.mjs?v=41');
+      return await readDateLine(data, parseDate, focused, text => parseDates([text], false, true));
     } catch (_) {
       // The standard OCR fallback remains available on older browsers.
       return [];
@@ -225,16 +225,28 @@
     } finally { bitmap.close(); }
   }
 
+  function applyPhotoDate(value) {
+    const field = $('dates'), entries = field.value.split(/[;\n]+/).map(entry => entry.trim()).filter(Boolean);
+    if (!entries.some(entry => {
+      try { return date(entry) === date(value); } catch (_) { return entry === value; }
+    })) entries.push(value);
+    field.value = entries.join('; ');
+    const note = 'MHD aus dem Foto: ' + value + '. Bitte mit dem Stempel vergleichen.';
+    report('localOcrStatus', note);
+    msg(note);
+  }
+
   window.vachaReadPhotoDate = async photo => {
     if (running) throw Error('Eine lokale Erkennung läuft bereits.');
     running = true;
     const draft = photoGalleryDraft, data = photo.data;
     const active = () => !$('edit').hidden && draft === photoGalleryDraft && draft.includes(photo) && photo.data === data;
     try {
+      $('photoDateChoices').hidden = true;
       report('localOcrStatus', 'Lese Datumsstempel …');
       const worker = await getWorker('localOcrStatus');
       const {data: result} = await worker.recognize(data);
-      let dates = parseDates(result.text.split(/\r?\n/).map(line => line.trim()).filter(Boolean), true);
+      let dates = parseDates(result.text.split(/\r?\n/).map(line => line.trim()).filter(Boolean), true, false, true);
       if (!dates.length) dates = await retryStamp(worker, data);
       if (!active()) return;
       if (!dates.length) {
@@ -243,16 +255,23 @@
         msg(note, true);
         return;
       }
-      const field = $('dates'), entries = field.value.split(/[;\n]+/).map(value => value.trim()).filter(Boolean);
-      for (const value of dates) {
-        if (!entries.some(entry => {
-          try { return date(entry) === date(value); } catch (_) { return entry === value; }
-        })) entries.push(value);
+      if (dates.length > 1) {
+        const panel = $('photoDateChoices');
+        panel.replaceChildren();
+        panel.hidden = false;
+        const preview = el('img');
+        preview.src = data;
+        preview.alt = 'Foto mit Datumsstempel';
+        panel.append(el('b', 'Welches Datum ist das MHD?'), preview);
+        for (const value of dates) panel.append(btn(value + ' übernehmen', () => {
+          if (!active()) return;
+          applyPhotoDate(value);
+          panel.hidden = true;
+        }));
+        panel.scrollIntoView({ block: 'center' });
+        return;
       }
-      field.value = entries.join('; ');
-      const note = 'MHD aus dem Foto: ' + dates.join(', ') + '. Bitte mit dem Stempel vergleichen.';
-      report('localOcrStatus', note);
-      msg(note);
+      applyPhotoDate(dates[0]);
     } finally { running = false; if (pendingDraft) scheduleAutomatic(); }
   };
 
@@ -280,7 +299,8 @@
         for (const weight of parsed.weights) weights.push({ ...weight, score: weight.score + (photo.role === 'front' ? 2 : 0) });
       }
       if (!parsed.dates.length && photo.role === 'date') {
-        parsed.dates = await retryStamp(worker, photo.data).catch(() => []);
+        const dates = await retryStamp(worker, photo.data).catch(() => []);
+        if (dates.length === 1) parsed.dates = dates;
       }
       fields.dates.push(...parsed.dates);
       fields.price ||= parsed.price;
@@ -308,7 +328,8 @@
     const distinct = top && weights.some(w => w.score === top.score &&
       (metric(w) !== metric(top) || /g$/.test(w.unit) !== /g$/.test(top.unit)));
     fields.weight = distinct ? null : top;
-    fields.dates = [...new Set(fields.dates)].join('; ');
+    const foundDates = [...new Set(fields.dates)];
+    fields.dates = foundDates.length === 1 ? foundDates[0] : '';
     return { fields, codes, ocrFailed };
   }
 
