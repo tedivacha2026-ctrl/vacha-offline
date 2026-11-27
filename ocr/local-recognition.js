@@ -153,6 +153,13 @@
   }
 
   async function retryStamp(worker, data) {
+    try {
+      const {readDateLine} = await import('./date-model/recognize.mjs');
+      const dates = await readDateLine(data, parseDate);
+      if (dates.length) return dates;
+    } catch (_) {
+      // The standard OCR fallback remains available on older browsers.
+    }
     const bitmap = await createImageBitmap(await (await fetch(data)).blob());
     try {
       // Try sparse text on a larger, higher-contrast image. The lower crop
