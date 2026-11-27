@@ -21,7 +21,7 @@
     await new Promise(r=>requestAnimationFrame(r));
     const existing=document.querySelector('#results .entry button');
     if (existing) { existing.click(); say('Barcode erkannt – vorhandenen Artikel geöffnet.'); return; }
-    $('new').click(); $('ean').value=code; $('name').focus(); say('Barcode erkannt. Artikelnamen und weitere Angaben ergänzen.');
+    $('new').click(); $('ean').value=code; $('ean').dispatchEvent(new Event('change',{bubbles:true})); $('name').focus(); say('Barcode erkannt. Produktdatenbank wird abgefragt; Angaben bitte prüfen.');
   }
   scanButton.onclick = async () => {
     if (!('BarcodeDetector' in window)) { say('Barcode-Live-Erkennung wird von diesem Browser nicht unterstützt. Nutze das Foto-Feld oder gib die Nummer ein.',true); return; }

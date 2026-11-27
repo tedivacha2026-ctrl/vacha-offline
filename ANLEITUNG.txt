@@ -1,0 +1,27 @@
+VACHA OFFLINE – PRODUKTDATENBANK UND BILD-KI
+
+Artikeldaten aus öffentlichen Datenbanken
+- Beim Barcode-Abgleich fragt die App die universelle Open Facts API ab: Open Food, Open Beauty, Open Products und Open Pet Food Facts.
+- Wenn auf einem Foto kein Barcode erkannt wird, kann die App den per OCR gelesenen Artikelnamen in der passenden Datenbank suchen und Vorschläge mit Name, Barcode, Bild und Packungsinhalt anzeigen.
+- Für diese Namenssuche wird nur der gelesene Text übertragen, kein Produktfoto. Die Datenbankabfrage erfolgt nur nach einer Erkennung, nicht während der Eingabe.
+- Ausgewählte Produktdaten werden nur in leere Felder eingesetzt; Preis und Pfand bitte am Regal prüfen. MHD und Verkaufspreis sind nicht zuverlässig produktweit verfügbar.
+- Öffentliche Treffer und eigene bestätigte Artikel werden lokal gespeichert. Eigene synchronisierte Artikel dienen künftig auch als lokale Vorschläge; die Datenbank wächst mit der Artikelliste.
+
+Lokale Erkennung und Gemini
+- „Lokal erkennen (ohne Gemini)“ führt OCR aus, schlägt eine grobe Produktgruppe vor und sucht den erkannten Artikelnamen in der passenden öffentlichen Datenbank. Fotos verlassen das Gerät nicht.
+- Das lokale Bildmodell unterscheidet Pflege/Kosmetik, Snacks, Wasch-/Reinigungsmittel und Tierfutter. Es erkennt keine exakte Marke oder SKU und liest Preis oder MHD nicht zuverlässig.
+- Gemini bleibt als optionale genauere Bildauswertung verfügbar. Fotos werden nur bei Antippen der Gemini-Schaltfläche an Gemini gesendet.
+- Die bestätigte Artikelliste verbessert künftige Vorschläge. Das Bildmodell wird durch neue Fotos nicht automatisch neu trainiert; dafür muss ein neuer Trainingslauf erstellt werden.
+
+Installation / Aktualisierung
+1. Im Apps-Script-Projekt OfflineSync.gs durch die beiliegende Version ersetzen; Code.gs und Index.html im Projekt beibehalten.
+2. Apps-Script-Projekt speichern und die bestehende Web-App mit einer neuen Version bereitstellen.
+3. Alle Dateien dieses Pakets gemeinsam auf dem bisherigen HTTPS-Host bereitstellen; die Ordner ocr und ml vollständig übernehmen.
+4. App schließen und neu öffnen, damit der neue Service-Worker-Cache geladen wird. Beim ersten App-Update werden die Laufzeitdateien der lokalen Bild-KI mit heruntergeladen.
+5. Einen Barcodeartikel sowie einen Artikel ohne lesbaren Barcode testen: Die lokale Erkennung sollte Text eintragen und bei Internetzugang passende Datenbankvorschläge zeigen.
+
+Daten und Rechte
+- Die Produktdaten kommen aus Open Food Facts, Open Beauty Facts, Open Products Facts und Open Pet Food Facts. Die Barcodesuche nutzt die universelle product_type=all-Abfrage. Die Namenssuche verwendet den Open-Facts-Volltext-Endpunkt.
+- Die Datenbank steht unter ODbL; Bildlizenzen können je Foto abweichen. Bei Weitergabe von Daten/Bildern Lizenz und Namensnennung beachten.
+- Der lokale Klassifikator wurde mit rund 500 öffentlichen Bildern trainiert. Die vorläufige Validierung lag bei rund 74 Prozent; dies ist noch keine Feldprüfung.
+- Preis, Pfand und MHD bitte immer am tatsächlichen Produkt oder TEDi-Preisschild prüfen.
