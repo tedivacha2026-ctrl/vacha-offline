@@ -53,6 +53,25 @@
     return String(d).padStart(2, '0') + '.' + String(m).padStart(2, '0') + '.' + y;
   }
 
+  function parseDates(lines, isDatePhoto) {
+    const markedDates = new Set(), stampDates = new Set();
+    const datePattern = /(?<!\d)(\d{1,2}\s*[.\/-]\s*\d{1,2}\s*[.\/-]\s*(?:20\d{2}|\d{2})|\d{8}|\d{6})(?!\d)/g;
+    const dateMarker = /\b(?:mhd|bb[de]|exp(?:iry)?)\b|mindestens\s+haltbar|best\s+before|zu\s+verbrauchen\s+bis/i;
+    const otherMarker = /\b(?:mfg|prod|lot|charge)\b|hergestellt|abgefüllt|production\s+date/i;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i], previous = lines[i - 1] || '';
+      const marked = dateMarker.test(line) || (!otherMarker.test(line) && dateMarker.test(previous));
+      if (!marked && (!isDatePhoto || otherMarker.test(line) || (otherMarker.test(previous) && !/\d/.test(previous)))) continue;
+      for (const match of line.matchAll(datePattern)) {
+        let raw = match[1].replace(/\s/g, '');
+        if (/^\d{4}20\d{2}$/.test(raw)) raw = raw.replace(/^(\d{2})(\d{2})(\d{4})$/, '$1.$2.$3');
+        const date = parseDate(raw);
+        if (date) (marked ? markedDates : stampDates).add(date);
+      }
+    }
+    return [...(markedDates.size ? markedDates : stampDates.size === 1 ? stampDates : [])];
+  }
+
   function parseText(text, photos) {
     const lines = text.split(/[\r\n]+/).map(line => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
     const nameLines = lines.map((line, index) => {
@@ -87,23 +106,7 @@
       }
     });
 
-    const markedDates = new Set(), stampDates = new Set();
-    const datePattern = /(?<!\d)(\d{1,2}\s*[.\/-]\s*\d{1,2}\s*[.\/-]\s*(?:20\d{2}|\d{2})|\d{8}|\d{6})(?!\d)/g;
-    const dateMarker = /\b(?:mhd|bb[de]|exp(?:iry)?)\b|mindestens\s+haltbar|best\s+before|zu\s+verbrauchen\s+bis/i;
-    const otherMarker = /\b(?:mfg|prod|lot|charge)\b|hergestellt|abgefüllt|production\s+date/i;
-    const isDatePhoto = photos.some(photo => photo.role === 'date');
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i], previous = lines[i - 1] || '';
-      const marked = dateMarker.test(line) || (!otherMarker.test(line) && dateMarker.test(previous));
-      if (!marked && (!isDatePhoto || otherMarker.test(line) || (otherMarker.test(previous) && !/\d/.test(previous)))) continue;
-      for (const match of line.matchAll(datePattern)) {
-        let raw = match[1].replace(/\s/g, '');
-        if (/^\d{4}20\d{2}$/.test(raw)) raw = raw.replace(/^(\d{2})(\d{2})(\d{4})$/, '$1.$2.$3');
-        const date = parseDate(raw);
-        if (date) (marked ? markedDates : stampDates).add(date);
-      }
-    }
-    const dates = [...(markedDates.size ? markedDates : stampDates.size === 1 ? stampDates : [])];
+    const dates = parseDates(lines, photos.some(photo => photo.role === 'date'));
 
     const prices = [], deposits = [];
     for (let i = 0; i < lines.length; i++) {
@@ -131,6 +134,62 @@
       .map(m => m[0].replace(/\D/g, '')).filter(gtin);
   }
 
+  async function retryStamp(worker, data) {
+    const bitmap = await createImageBitmap(await (await fetch(data)).blob());
+    try {
+      // Try sparse text on a larger, higher-contrast image. The lower crop
+      // gives small stamps more pixels and reduces surrounding packaging text.
+      for (const top of [0, 0.42]) {
+        const y = Math.round(bitmap.height * top), height = bitmap.height - y;
+        const scale = Math.min(3, 1800 / Math.max(bitmap.width, height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(bitmap.width * scale);
+        canvas.height = Math.round(height * scale);
+        const ctx = canvas.getContext('2d');
+        ctx.filter = 'grayscale(1) contrast(2.6)';
+        ctx.drawImage(bitmap, 0, y, bitmap.width, height, 0, 0, canvas.width, canvas.height);
+        try {
+          await worker.setParameters({ tessedit_pageseg_mode: '11' });
+          const {data: result} = await worker.recognize(canvas);
+          const dates = parseDates(result.text.split(/\r?\n/).map(line => line.trim()).filter(Boolean), true);
+          if (dates.length) return dates;
+        } finally { await worker.setParameters({ tessedit_pageseg_mode: '3' }); }
+      }
+      return [];
+    } finally { bitmap.close(); }
+  }
+
+  window.vachaReadPhotoDate = async photo => {
+    if (running) throw Error('Eine lokale Erkennung läuft bereits.');
+    running = true;
+    const draft = photoGalleryDraft, data = photo.data;
+    const active = () => !$('edit').hidden && draft === photoGalleryDraft && draft.includes(photo) && photo.data === data;
+    try {
+      report('localOcrStatus', 'Lese Datumsstempel …');
+      const worker = await getWorker('localOcrStatus');
+      const {data: result} = await worker.recognize(data);
+      let dates = parseDates(result.text.split(/\r?\n/).map(line => line.trim()).filter(Boolean), true);
+      if (!dates.length) dates = await retryStamp(worker, data);
+      if (!active()) return;
+      if (!dates.length) {
+        const note = 'Kein eindeutiges MHD gefunden. Bitte das Foto auf den Datumsstempel zuschneiden und erneut versuchen.';
+        report('localOcrStatus', note);
+        msg(note, true);
+        return;
+      }
+      const field = $('dates'), entries = field.value.split(/[;\n]+/).map(value => value.trim()).filter(Boolean);
+      for (const value of dates) {
+        if (!entries.some(entry => {
+          try { return date(entry) === date(value); } catch (_) { return entry === value; }
+        })) entries.push(value);
+      }
+      field.value = entries.join('; ');
+      const note = 'MHD aus dem Foto: ' + dates.join(', ') + '. Bitte mit dem Stempel vergleichen.';
+      report('localOcrStatus', note);
+      msg(note);
+    } finally { running = false; }
+  };
+
   async function recognize(photos, statusId) {
     if (!photos.length || photos.length > 5) throw Error('Bitte 1 bis 5 Fotos pro Artikel auswählen.');
     const barcodeHits = new Set(), printedCodes = new Set(), names = [], weights = [];
@@ -154,6 +213,9 @@
       if (photo.role !== 'date') {
         if (parsed.name) names.push({ name: parsed.name, score: photo.role === 'front' ? 4 : photo.role === 'code' ? 0 : 2 });
         for (const weight of parsed.weights) weights.push({ ...weight, score: weight.score + (photo.role === 'front' ? 2 : 0) });
+      }
+      if (!parsed.dates.length && photo.role === 'date') {
+        parsed.dates = await retryStamp(worker, photo.data).catch(() => []);
       }
       fields.dates.push(...parsed.dates);
       fields.price ||= parsed.price;
