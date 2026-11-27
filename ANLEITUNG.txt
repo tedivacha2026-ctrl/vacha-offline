@@ -14,11 +14,11 @@ Lokale Erkennung und Gemini
 - Die bestätigte Artikelliste verbessert künftige Vorschläge. Das Bildmodell wird durch neue Fotos nicht automatisch neu trainiert; dafür muss ein neuer Trainingslauf erstellt werden.
 
 Installation / Aktualisierung
-1. Im Apps-Script-Projekt OfflineSync.gs durch die beiliegende Version ersetzen; Code.gs und Index.html im Projekt beibehalten.
+1. Das aktualisierte OfflineSync.gs aus der bereitgestellten Datei in das bestehende Apps-Script-Projekt übernehmen. Code.gs und Index.html im Apps-Script-Projekt beibehalten.
 2. Apps-Script-Projekt speichern und die bestehende Web-App mit einer neuen Version bereitstellen.
 3. Alle Dateien dieses Pakets gemeinsam auf dem bisherigen HTTPS-Host bereitstellen; die Ordner ocr und ml vollständig übernehmen.
-4. App schließen und neu öffnen, damit der neue Service-Worker-Cache geladen wird. Beim ersten App-Update werden die Laufzeitdateien der lokalen Bild-KI mit heruntergeladen.
-5. Einen Barcodeartikel sowie einen Artikel ohne lesbaren Barcode testen: Die lokale Erkennung sollte Text eintragen und bei Internetzugang passende Datenbankvorschläge zeigen.
+4. App schließen und neu öffnen, damit der Service-Worker-Cache Version 28 geladen wird.
+5. Testen: einen Barcodeartikel öffnen und den Barcode ändern. Nach dem Abgleich müssen Artikel, MHD-Verlauf und Produktfoto unter der neuen Nummer erreichbar sein. Zusätzlich einen offenen Auftrag mit „Artikel fehlt inzwischen“ über „Artikel wiederherstellen“ erneut synchronisieren.
 
 Daten und Rechte
 - Die Produktdaten kommen aus Open Food Facts, Open Beauty Facts, Open Products Facts und Open Pet Food Facts. Die Barcodesuche nutzt die universelle product_type=all-Abfrage. Die Namenssuche verwendet den Open-Facts-Volltext-Endpunkt.
