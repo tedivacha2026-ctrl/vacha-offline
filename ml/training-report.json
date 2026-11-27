@@ -1,0 +1,21 @@
+{
+  "classes": [
+    "Beauty_PersonalCare",
+    "Food_Snacks",
+    "Household_Cleaning",
+    "Pet_Food"
+  ],
+  "samples_per_class": {
+    "Beauty_PersonalCare": 100,
+    "Food_Snacks": 217,
+    "Household_Cleaning": 100,
+    "Pet_Food": 80
+  },
+  "excluded_small_classes": {},
+  "validation": {
+    "accuracy": 0.7373737096786499,
+    "loss": 0.7270500659942627
+  },
+  "epochs_ran": 8,
+  "model_scope": "broad product groups, not exact SKU identification"
+}

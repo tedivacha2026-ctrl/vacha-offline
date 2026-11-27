@@ -1,0 +1,7 @@
+TensorFlow.js and TensorFlow.js TFLite browser runtime
+Copyright 2021-2023 Google LLC. Licensed under Apache License 2.0.
+See Apache-2.0.txt.
+Sources: https://www.npmjs.com/package/@tensorflow/tfjs and https://www.npmjs.com/package/@tensorflow/tfjs-tflite
+
+Vacha product-group model
+Trained from Open Facts public product images. Dataset/database terms may include ODbL; product image terms vary by image. The model is a broad category experiment and does not identify exact SKUs.
