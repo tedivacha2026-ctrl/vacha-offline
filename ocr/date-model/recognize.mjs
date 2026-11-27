@@ -63,30 +63,71 @@ async function readCrop(bitmap, rect, session, characters) {
   }
 }
 
-export async function readDateLine(data, parseDate) {
+async function readDateFromCrops(image, crops, session, characters, parseDate) {
+  const candidates = new Map();
+  for (const crop of crops) {
+    const { text, confidence } = await readCrop(image, crop, session, characters);
+    // Require a valid date with both separators. Compare overlapping lines
+    // before suggesting a date if the individual characters were uncertain.
+    const match = text.trim().match(/^(\d{2}[.\/-]\d{2}[.\/-](?:20\d{2}|\d{2}))(?!\d)/);
+    const date = match && confidence >= 0.5 && parseDate(match[1]);
+    if (date) {
+      const candidate = candidates.get(date) || { count: 0, confidence: 0 };
+      candidate.count++;
+      candidate.confidence = Math.max(candidate.confidence, confidence);
+      candidates.set(date, candidate);
+    }
+  }
+  if (candidates.size !== 1) return [];
+  const [[date, candidate]] = candidates;
+  return candidate.count >= 2 || candidate.confidence >= 0.85 ? [date] : [];
+}
+
+function turnedImage(bitmap, degrees) {
+  const canvas = document.createElement('canvas');
+  canvas.width = degrees === 180 ? bitmap.width : bitmap.height;
+  canvas.height = degrees === 180 ? bitmap.height : bitmap.width;
+  const ctx = canvas.getContext('2d');
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate(degrees * Math.PI / 180);
+  ctx.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2);
+  return canvas;
+}
+
+function commonCrops(image) {
+  const landscape = image.width / image.height > 1.8;
+  const crops = landscape ? [[0, 0, 1, 1], [0, 0, 0.68, 0.6]] : [];
+  crops.push([0.22, 0.497, 0.50, 0.575], [0.24, 0.50, 0.50, 0.576],
+    [0.15, 0.54, 0.58, 0.63], [0.12, 0.64, 0.58, 0.74], [0.12, 0.75, 0.58, 0.86]);
+  return crops;
+}
+
+const extraCrops = [0.18, 0.26, 0.34, 0.42, 0.50, 0.60, 0.68, 0.76, 0.84].flatMap(center =>
+  [[0.22, center - 0.04, 0.50, center + 0.04], [0.24, center - 0.037, 0.50, center + 0.037],
+    [0.06, center - 0.06, 0.50, center + 0.06], [0.43, center - 0.06, 0.91, center + 0.06]]);
+
+export async function readDateLine(data, parseDate, focused = false) {
   const [session, characters] = await getModel();
   const bitmap = await createImageBitmap(await (await fetch(data)).blob());
   try {
-    // Cover a close crop and several likely stamp lines on packaging photos.
-    const landscape = bitmap.width / bitmap.height > 1.8;
-    const crops = landscape ? [[0, 0, 1, 1], [0, 0, 0.68, 0.6]] : [];
-    crops.push([0.22, 0.497, 0.50, 0.575], [0.24, 0.50, 0.50, 0.576],
-      [0.15, 0.54, 0.58, 0.63], [0.12, 0.64, 0.58, 0.74], [0.12, 0.75, 0.58, 0.86]);
-    const candidates = new Map();
-    for (const crop of crops) {
-      const { text, confidence } = await readCrop(bitmap, crop, session, characters);
-      // Require the full date and both separators. A clipped row or a lot
-      // number must not turn into a suggested date.
-      const match = text.trim().match(/^(\d{2}[.\/-]\d{2}[.\/-](?:20\d{2}|\d{2}))(?!\d)/);
-      const date = match && confidence >= 0.5 && parseDate(match[1]);
-      if (date) {
-        const candidate = candidates.get(date) || { count: 0, confidence: 0 };
-        candidate.count++;
-        candidate.confidence = Math.max(candidate.confidence, confidence);
-        candidates.set(date, candidate);
+    const attempt = (image, crops) => readDateFromCrops(image, crops, session, characters, parseDate);
+    const direct = await attempt(bitmap, commonCrops(bitmap));
+    if (direct.length) return direct;
+    if (focused) {
+      const dates = await attempt(bitmap, extraCrops);
+      if (dates.length) return dates;
+    }
+    if (!focused && bitmap.width <= bitmap.height) return [];
+    const dates = new Set();
+    for (const degrees of [90, 270, 180]) {
+      const image = turnedImage(bitmap, degrees);
+      try {
+        for (const date of await attempt(image, commonCrops(image))) dates.add(date);
+        if (dates.size > 1) return [];
+      } finally {
+        image.width = image.height = 0;
       }
     }
-    const dates = [...candidates].filter(([, candidate]) => candidate.count >= 2 || candidate.confidence >= 0.85);
-    return dates.length === 1 ? [dates[0][0]] : [];
+    return [...dates];
   } finally { bitmap.close(); }
 }

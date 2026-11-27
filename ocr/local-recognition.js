@@ -152,10 +152,10 @@
       .map(m => m[0].replace(/\D/g, '')).filter(gtin);
   }
 
-  async function readWithDateModel(data) {
+  async function readWithDateModel(data, focused = false) {
     try {
-      const { readDateLine } = await import('./date-model/recognize.mjs');
-      return await readDateLine(data, parseDate);
+      const { readDateLine } = await import('./date-model/recognize.mjs?v=40');
+      return await readDateLine(data, parseDate, focused);
     } catch (_) {
       // The standard OCR fallback remains available on older browsers.
       return [];
@@ -163,7 +163,7 @@
   }
 
   async function retryStamp(worker, data) {
-    const modelDates = await readWithDateModel(data);
+    const modelDates = await readWithDateModel(data, true);
     if (modelDates.length) return modelDates;
     const bitmap = await createImageBitmap(await (await fetch(data)).blob());
     try {
