@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
-  let running = false, workerStatus = '';
+  let running = false, workerStatus = '', pendingDraft = null, automaticTimer;
   let workerPromise = null;
   const ignored = /zutaten|nährwert|naehrwert|fett|kohlenhydrat|zucker|protein|eiweiß|salz|sodium|kcal|kj|energie|hersteller|anschrift|lagerung|portion|je 100|pro 100|www\.|gmbh|ingredient|nutri|warning|recycling/i;
   const uiLine = /produktfotos|aus galerie|galerie wählen|foto aufnehmen|artikelname|vacha offline|netz verfügbar|abgleich|etikett kopieren|lokal speichern|produktdaten|barcode \/ interne nummer|produktfoto|gemini erkennen|preis|pfand|inhalt|einheit|barcode|mhd|datum/i;
@@ -248,7 +248,7 @@
       const note = 'MHD aus dem Foto: ' + dates.join(', ') + '. Bitte mit dem Stempel vergleichen.';
       report('localOcrStatus', note);
       msg(note);
-    } finally { running = false; }
+    } finally { running = false; if (pendingDraft) scheduleAutomatic(); }
   };
 
   async function recognize(photos, statusId) {
@@ -381,16 +381,17 @@
     }
   }
 
-  async function recognizeProduct() {
+  async function recognizeProduct(automatic = false) {
     const draft = photoGalleryDraft, photos = freezePhotos(draft), article = editing;
     const active = () => !$('edit').hidden && draft === photoGalleryDraft && article === editing && samePhotos(photos, draft);
     $('photoProductMatches').hidden = true;
+    report('localOcrStatus', 'Produktfotos werden lokal gelesen …');
     const result = await productData(photos, 'localOcrStatus', () => $('ean').value.trim(), active);
     if (!result || !active()) return;
     const id = key => key === 'barcode' ? 'ean' : key;
     const changed = fillFields(result.values, key => $(id(key)).value, (key, value) => {
       const input = $(id(key));
-      if (input.disabled) return false;
+      if (input.disabled || (automatic && ['price', 'deposit'].includes(key))) return false;
       input.value = ['quantity', 'price', 'deposit'].includes(key) ? String(value).replace('.', ',') : value;
       return true;
     });
@@ -435,17 +436,42 @@
     report('bulkLocalOcrStatus', notes.join(' ') || 'Vorschläge für die Gruppen geprüft. Bitte mit den Produkten vergleichen.');
   }
 
-  function bindRecognition(id, statusId, run) {
-    $(id).onclick = act(async () => {
-      if (running) throw Error('Eine lokale Erkennung läuft bereits.');
-      running = true;
-      $(id).disabled = true;
-      try { await run(); }
-      catch (error) { report(statusId, error.message); throw error; }
-      finally { running = false; $(id).disabled = false; }
-    });
+  async function runRecognition(id, statusId, run) {
+    running = true;
+    $(id).disabled = true;
+    try { await run(); }
+    catch (error) { report(statusId, error.message); throw error; }
+    finally {
+      running = false;
+      $(id).disabled = false;
+      if (pendingDraft) scheduleAutomatic();
+    }
   }
 
-  bindRecognition('aiLocal', 'localOcrStatus', recognizeProduct);
-  bindRecognition('bulkLocalOcr', 'bulkLocalOcrStatus', recognizeBulk);
+  function scheduleAutomatic() {
+    clearTimeout(automaticTimer);
+    automaticTimer = setTimeout(act(async () => {
+      if (running) return;
+      const draft = pendingDraft;
+      pendingDraft = null;
+      if (draft !== photoGalleryDraft || $('edit').hidden || !$('cameraSeriesModal').hidden || !draft.length) return;
+      await runRecognition('aiLocal', 'localOcrStatus', () => recognizeProduct(true));
+    }), 300);
+  }
+
+  window.vachaQueueRecognition = () => {
+    if ($('edit').hidden || !photoGalleryDraft.length) return;
+    pendingDraft = photoGalleryDraft;
+    scheduleAutomatic();
+  };
+
+  $('aiLocal').onclick = act(async () => {
+    if (running) throw Error('Eine lokale Erkennung läuft bereits.');
+    pendingDraft = null;
+    await runRecognition('aiLocal', 'localOcrStatus', recognizeProduct);
+  });
+  $('bulkLocalOcr').onclick = act(async () => {
+    if (running) throw Error('Eine lokale Erkennung läuft bereits.');
+    await runRecognition('bulkLocalOcr', 'bulkLocalOcrStatus', recognizeBulk);
+  });
 })();
