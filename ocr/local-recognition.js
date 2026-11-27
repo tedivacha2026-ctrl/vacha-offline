@@ -53,7 +53,7 @@
     return String(d).padStart(2, '0') + '.' + String(m).padStart(2, '0') + '.' + y;
   }
 
-  function parseDates(lines, isDatePhoto) {
+  function parseDates(lines, isDatePhoto, requireSeparators = false) {
     const markedDates = new Set(), stampDates = new Set(), separatedDates = new Set();
     const datePattern = /(?<!\d)(\d{1,2}\s*[.\/-]\s*\d{1,2}\s*[.\/-]\s*(?:20\d{2}|\d{2})|\d{8}|\d{6})(?!\d)/g;
     const dateMarker = /\b(?:mhd|bb[de]|exp(?:iry)?)\b|mindestens\s+haltbar|best\s+before|zu\s+verbrauchen\s+bis/i;
@@ -63,6 +63,7 @@
       const marked = dateMarker.test(line) || (!otherMarker.test(line) && dateMarker.test(previous));
       if (!marked && (!isDatePhoto || otherMarker.test(line) || (otherMarker.test(previous) && !/\d/.test(previous)))) continue;
       for (const match of line.matchAll(datePattern)) {
+        if (requireSeparators && !/[.\/-]/.test(match[1])) continue;
         let raw = match[1].replace(/\s/g, '');
         if (/^\d{4}20\d{2}$/.test(raw)) raw = raw.replace(/^(\d{2})(\d{2})(\d{4})$/, '$1.$2.$3');
         const date = parseDate(raw);
@@ -140,35 +141,55 @@
     try {
       // Try sparse text on a larger, higher-contrast image. The lower crop
       // gives small stamps more pixels and reduces surrounding packaging text.
-      for (const [top, bottom, joinDots] of [[0, 1, false], [0.42, 1, false], [0.42, 0.78, true], [0, 1, true]]) {
+      const passes = [
+        [0, 1, false], [0.42, 1, false], [0.42, 0.78, true], [0, 1, true],
+        // On these stamps the date is commonly at the start of the first row.
+        [0, 0.42, true, 0, 0.52, '7'],
+        [0, 0.65, true, 0, 0.62, '7'],
+        [0, 0.72, true, 0, 1, '7'],
+        [0.48, 0.65, true, 0.13, 0.61, '7']
+      ];
+      for (const [top, bottom, joinDots, left = 0, right = 1, mode = '11'] of passes) {
         const y = Math.round(bitmap.height * top), height = Math.max(1, Math.round(bitmap.height * bottom) - y);
-        const scale = Math.min(3, 1800 / Math.max(bitmap.width, height));
+        const x = Math.round(bitmap.width * left), width = Math.max(1, Math.round(bitmap.width * right) - x);
+        const scale = Math.min(mode === '7' ? 5 : 3, 1800 / Math.max(width, height));
         const canvas = document.createElement('canvas');
-        canvas.width = Math.round(bitmap.width * scale);
+        canvas.width = Math.round(width * scale);
         canvas.height = Math.round(height * scale);
         const ctx = canvas.getContext('2d');
         ctx.filter = 'grayscale(1) contrast(2.6)';
-        ctx.drawImage(bitmap, 0, y, bitmap.width, height, 0, 0, canvas.width, canvas.height);
+        ctx.drawImage(bitmap, x, y, width, height, 0, 0, canvas.width, canvas.height);
         if (joinDots) {
           // Darken each pixel with its neighbors so the separated ink dots form strokes.
           const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const source = new Uint8ClampedArray(pixels.data);
-          const stride = canvas.width * 4;
-          const radius = Math.max(1, Math.min(3, Math.round(scale)));
-          for (let row = radius; row < canvas.height - radius; row++) {
-            for (let col = radius; col < canvas.width - radius; col++) {
-              const i = row * stride + col * 4;
-              const value = Math.min(source[i], source[i - 4 * radius], source[i + 4 * radius],
-                source[i - stride * radius], source[i + stride * radius]);
-              pixels.data[i] = pixels.data[i + 1] = pixels.data[i + 2] = value;
+          const w = canvas.width, h = canvas.height;
+          const horizontal = new Uint8Array(w * h);
+          const radius = Math.max(1, Math.min(8, Math.round(scale * (mode === '7' ? 1.7 : 0.8))));
+          for (let row = 0; row < h; row++) {
+            for (let col = 0; col < w; col++) {
+              let darkest = 255;
+              for (let x = Math.max(0, col - radius); x <= Math.min(w - 1, col + radius); x++) {
+                darkest = Math.min(darkest, pixels.data[(row * w + x) * 4]);
+              }
+              horizontal[row * w + col] = darkest;
+            }
+          }
+          for (let row = 0; row < h; row++) {
+            for (let col = 0; col < w; col++) {
+              let darkest = 255;
+              for (let y = Math.max(0, row - radius); y <= Math.min(h - 1, row + radius); y++) {
+                darkest = Math.min(darkest, horizontal[y * w + col]);
+              }
+              const i = (row * w + col) * 4;
+              pixels.data[i] = pixels.data[i + 1] = pixels.data[i + 2] = darkest;
             }
           }
           ctx.putImageData(pixels, 0, 0);
         }
         try {
-          await worker.setParameters({ tessedit_pageseg_mode: '11' });
+          await worker.setParameters({ tessedit_pageseg_mode: mode });
           const {data: result} = await worker.recognize(canvas);
-          const dates = parseDates(result.text.split(/\r?\n/).map(line => line.trim()).filter(Boolean), true);
+          const dates = parseDates(result.text.split(/\r?\n/).map(line => line.trim()).filter(Boolean), true, mode === '7');
           if (dates.length) return dates;
         } finally { await worker.setParameters({ tessedit_pageseg_mode: '3' }); }
       }
@@ -189,7 +210,7 @@
       if (!dates.length) dates = await retryStamp(worker, data);
       if (!active()) return;
       if (!dates.length) {
-        const note = 'Kein eindeutiges MHD gefunden. Bitte das Foto auf den Datumsstempel zuschneiden und erneut versuchen.';
+        const note = 'Kein eindeutiges MHD gefunden. Bitte das Datum vom Stempel in „Neue MHD“ eintragen.';
         report('localOcrStatus', note);
         msg(note, true);
         return;
@@ -352,7 +373,7 @@
     });
     label();
     const note = status(result, changed);
-    const mhdHint = photos.some(p => p.role === 'date') && !result.values.dates ? ' Kein eindeutiges MHD gefunden. Bitte den Datumsstempel enger fotografieren oder das Datum eintragen.' : '';
+    const mhdHint = photos.some(p => p.role === 'date') && !result.values.dates ? ' Kein eindeutiges MHD gefunden. Bitte das Datum vom Stempel in „Neue MHD“ eintragen.' : '';
     report('localOcrStatus', note + mhdHint);
     if (result.known && !editing) renderPhotoMatches([], active, result.known);
     if (result.conflict || editing || $('ean').value.trim()) return;
