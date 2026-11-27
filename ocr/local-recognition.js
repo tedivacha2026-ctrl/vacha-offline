@@ -305,14 +305,16 @@
   async function recognize(photos, statusId, scanBarcodes, needsDate) {
     if (!photos.length || photos.length > 5) throw Error('Bitte 1 bis 5 Fotos pro Artikel auswählen.');
     const workerReady = getWorker(statusId).catch(() => null);
-    const barcodeHits = new Set(await scanBarcodes), printedCodes = new Set(), names = [], weights = [];
+    const barcodeByPhoto = await scanBarcodes;
+    const barcodeHits = new Set(barcodeByPhoto.flat()), printedCodes = new Set(), names = [], weights = [];
+    const clues = photos.map((_, i) => ({ barcode: !!barcodeByPhoto[i]?.length, date: false, product: false }));
     const fields = { dates: [] };
     let ocrFailed = false;
     const worker = await workerReady;
     for (const [i, photo] of photos.entries()) {
       report(statusId, 'Lokal: lese Foto ' + (i + 1) + ' von ' + photos.length + ' …');
-      const learned = needsDate() ? await window.vachaLearnedPhotoDate(photo.data) : '';
-      if (learned) fields.dates.push(learned);
+      const learned = needsDate() || photo.roleManual === false ? await window.vachaLearnedPhotoDate(photo.data) : '';
+      if (learned) { fields.dates.push(learned); clues[i].date = true; }
       if (photo.role === 'date' && (learned || !needsDate())) continue;
       let text;
       try {
@@ -322,15 +324,19 @@
         ocrFailed = true;
         continue;
       }
-      barcodeText(text).forEach(value => printedCodes.add(value));
+      const printed = barcodeText(text);
+      for (const value of printed) printedCodes.add(value);
       const parsed = parseText(text, [photo]);
+      clues[i].barcode ||= printed.length > 0;
+      clues[i].product = !!parsed.name;
+      if (parsed.dates.length) clues[i].date = true;
       if (photo.role !== 'date') {
         if (parsed.name) names.push({ name: parsed.name, score: photo.role === 'front' ? 4 : photo.role === 'code' ? 0 : 2 });
         for (const weight of parsed.weights) weights.push({ ...weight, score: weight.score + (photo.role === 'front' ? 2 : 0) });
       }
       if (needsDate() && !learned && !parsed.dates.length && photo.role === 'date') {
         const dates = await retryStamp(worker, photo.data).catch(() => []);
-        if (dates.length === 1) parsed.dates = dates;
+        if (dates.length === 1) { parsed.dates = dates; clues[i].date = true; }
       }
       if (!learned) fields.dates.push(...parsed.dates);
       fields.price ||= parsed.price;
@@ -339,10 +345,11 @@
     if (needsDate() && !fields.dates.length && !photos.some(photo => photo.role === 'date')) {
       report(statusId, 'Prüfe die Produktfotos auf Datumsstempel …');
       const dates = new Set();
-      for (const photo of photos) {
+      for (const [i, photo] of photos.entries()) {
         if (photo.role === 'code') continue;
-        for (const date of await readWithDateModel(photo.data)) dates.add(date);
-        if (dates.size > 1) break;
+        const found = await readWithDateModel(photo.data);
+        if (found.length) clues[i].date = true;
+        for (const date of found) dates.add(date);
       }
       if (dates.size === 1) fields.dates.push(...dates);
     }
@@ -360,7 +367,9 @@
     fields.weight = distinct ? null : top;
     const foundDates = [...new Set(fields.dates)];
     fields.dates = foundDates.length === 1 ? foundDates[0] : '';
-    return { fields, codes, ocrFailed };
+    const roles = clues.map(({ barcode, date, product }) =>
+      barcode && date ? 'all' : date ? 'date' : barcode ? 'code' : product ? 'front' : 'all');
+    return { fields, codes, ocrFailed, roles };
   }
 
   function productByBarcode(code) {
@@ -371,8 +380,9 @@
 
   async function productData(photos, statusId, currentBarcode, active, { showCatalog = () => {}, showDate = () => {}, needsDate = () => true } = {}) {
     const scanBarcodes = Promise.all(photos.map(photo =>
-      window.vachaBarcodeFromPhoto(photo.data, true))).then(results => results.flat());
-    const nativeProduct = scanBarcodes.then(async hits => {
+      window.vachaBarcodeFromPhoto(photo.data, true)));
+    const nativeProduct = scanBarcodes.then(async byPhoto => {
+      const hits = byPhoto.flat();
       const codes = [...new Set(hits.map(code => code.padStart(14, '0')))];
       const current = currentBarcode();
       if (!active() || codes.length !== 1 || (current && current.padStart(14, '0') !== codes[0])) return null;
@@ -430,12 +440,12 @@
   }
 
   function freezePhotos(photos) {
-    return photos.map(({ data, role }) => ({ data, role }));
+    return photos.map(({ data, role, roleManual }) => ({ data, role, roleManual }));
   }
 
   function samePhotos(copy, current) {
     return copy.length === current.length && copy.every((p, i) =>
-      p.data === current[i].data && p.role === current[i].role);
+      p.data === current[i].data && p.role === current[i].role && p.roleManual === current[i].roleManual);
   }
 
   function renderPhotoMatches(items, active, known) {
@@ -488,6 +498,16 @@
       }
     });
     if (!result || !active()) return;
+    let rolesChanged = false;
+    for (const [i, role] of result.roles.entries()) {
+      // Old saved roles and explicit choices remain authoritative.
+      if (draft[i].roleManual !== false || draft[i].role === role) continue;
+      // Missing evidence in a later pass should not erase an earlier suggestion.
+      if (draft[i].role !== 'auto' && role === 'all') continue;
+      draft[i].role = photos[i].role = role;
+      rolesChanged = true;
+    }
+    if (rolesChanged) window.vachaRefreshPhotoRoles();
     const changed = [...earlyChanges, ...apply(result.values)];
     label();
     const note = status(result, changed);
@@ -498,7 +518,7 @@
     const currentName = $('name').value;
     const activeQuery = () => active() && currentName === $('name').value && !$('ean').value.trim();
     if (result.query) renderPhotoMatches(localCatalogSuggestions(result.query), activeQuery);
-    const category = await window.vachaClassifyProductPhotos(photos.filter(p => p.role === 'front' || p.role === 'all' || !p.role), text => {
+    const category = await window.vachaClassifyProductPhotos(photos.filter(p => p.role === 'front' || p.role === 'all' || p.role === 'auto' || !p.role), text => {
       if (activeQuery()) report('localOcrStatus', text);
     }).catch(() => null);
     if (!activeQuery()) return;
