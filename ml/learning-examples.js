@@ -132,8 +132,11 @@
       try {
         const value = await saveDateExample(data, input.value.trim());
         if (!active() || !panel.contains(input)) return;
-        if (!$('dates').value.trim()) $('dates').value = value;
-        status.textContent = 'MHD-Beispiel gespeichert. Dieses Foto wird künftig als ' + value + ' erkannt.';
+        const field = $('dates');
+        const entries = field.value.split(/[;\n]+/).map(entry => entry.trim()).filter(Boolean);
+        if (entries.length <= 1) field.value = value;
+        status.textContent = 'MHD-Beispiel gespeichert: ' + value + '.' +
+          (entries.length > 1 ? ' Im Formular stehen mehrere Daten. Bitte das zutreffende Datum dort korrigieren.' : ' Das Feld „Neue MHD“ wurde korrigiert.');
         msg(status.textContent);
       } catch (error) {
         if (active() && panel.contains(input)) status.textContent = error.message;
@@ -143,6 +146,28 @@
     panel.scrollIntoView({ block: 'center' });
     input.focus({ preventScroll: true });
   };
+
+  $('correctDateExample').onclick = act(() => {
+    const draft = photoGalleryDraft;
+    if (draft.length === 1) {
+      window.vachaOpenDateExample(draft[0]);
+      return;
+    }
+    const panel = $('photoDateChoices');
+    panel.replaceChildren();
+    panel.hidden = false;
+    panel.append(el('b', 'Auf welchem Foto ist der MHD-Stempel?'));
+    draft.forEach((photo, index) => {
+      const preview = el('img');
+      preview.src = photo.data;
+      preview.alt = 'Foto ' + (index + 1);
+      panel.append(preview, btn('Foto ' + (index + 1) + ' verwenden', () => {
+        if (draft !== photoGalleryDraft || !draft.includes(photo) || $('edit').hidden) return;
+        window.vachaOpenDateExample(photo);
+      }));
+    });
+    panel.scrollIntoView({ block: 'center' });
+  });
 
   async function exportExamples() {
     const [examples, dateExamples] = await Promise.all([
