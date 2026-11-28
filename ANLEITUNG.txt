@@ -13,6 +13,11 @@ Lokale Erkennung und Gemini
 - Gemini bleibt als optionale genauere Bildauswertung verfügbar. Fotos werden nur bei Antippen der Gemini-Schaltfläche an Gemini gesendet.
 - Die bestätigte Artikelliste verbessert künftige Vorschläge. Das Bildmodell wird durch neue Fotos nicht automatisch neu trainiert; dafür muss ein neuer Trainingslauf erstellt werden.
 
+Etikett und Druck
+- Die Artikelmaske zeigt eine 60 × 40 mm Vorschau mit Produktname, Packungsinhalt, Verkaufspreis, Pfand, separat bezeichnetem Grundpreis und EAN/UPC-Barcode.
+- „An NIIMBOT-App / Android weitergeben“ übergibt ein PNG an die Android-Freigabe. „Über Android drucken“ öffnet den Systemdruckdialog.
+- Eine direkte Bluetooth-Ansteuerung innerhalb dieser HTML-App ist nicht eingebaut. Dafür wird das zum Druckermodell passende NIIMBOT-Entwickler-SDK benötigt.
+
 Installation / Aktualisierung
 1. Das aktualisierte OfflineSync.gs aus der bereitgestellten Datei in das bestehende Apps-Script-Projekt übernehmen. Code.gs und Index.html im Apps-Script-Projekt beibehalten.
 2. Apps-Script-Projekt speichern und die bestehende Web-App mit einer neuen Version bereitstellen.
